@@ -218,3 +218,22 @@ kbd { font: inherit; font-size: .75rem; border: 1px solid var(--border); border-
 .hide-sm { display: inline; }
 @media (max-width: 520px) { .hide-sm { display: none; } .prompt { font-size: 1.15rem; } }
 .primary kbd { color: inherit; border-color: currentColor; opacity: .7; }
+
+/* Deck answers */
+.ans-list { margin: 4px 0 0; padding-left: 22px; }
+.ans-list li { margin: 2px 0; }
+.opt .ans-list { margin: 0; }
+.options.long { grid-template-columns: 1fr; }
+.verdict .ans { color: var(--text); font-weight: 500; margin-top: 6px; }
+.indent { margin: 6px 0 0 28px; }
+.drug hr { border: 0; border-top: 1px dashed var(--border); margin: 10px 0; }
+.ek { margin: 6px 0 0; font-size: .9rem; white-space: pre-wrap; }
+.face .big .ans-list { text-align: left; font-size: 1rem; font-weight: 600; }
+.pagetable { margin-bottom: 22px; }
+.pagetable h2 { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.pagetable .ed { font-size: .8rem; font-weight: 600; color: var(--muted); }
+.legend { font-size: .8rem; color: var(--muted); margin: 6px 2px 0; }
+.act { font-size: .8rem; color: var(--muted); margin-top: 4px; }
+a.secondary { display: inline-block; text-decoration: none; color: var(--text); }
+.chip.next { border-color: var(--accent); }
+.chip.next::before { content: "Next"; font-size: .65rem; font-weight: 700; padding: 1px 5px; border-radius: 6px; background: var(--accent); color: var(--accent-text); }

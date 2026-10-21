@@ -1,38 +1,32 @@
 # BDK Quiz
 
-A static practice site for the Basic Drug Knowledge (BDK) list. It asks the five question types used on the BDK quizzes:
+A static practice site and Quizlet deck set for the 2026-2027 Basic Drug Knowledge (BDK) list ("BDK List Revised May 2026"), organized page by page like the PDF (pages 2-27).
 
-- What is the **brand name** of _generic_?
-- What is the **generic name** of _brand_?
-- What is the **pharmacologic category** of _generic_?
-- What is the **common indication** of _generic_?
-- What is the **classification** of _generic_? (Rx only, OTC, or the controlled-substance schedule)
+## The site
 
-Modes: multiple choice (4 options, like a Quizlet test), written (type the answer, with an "I was right" override), and flashcards (cards marked "Still learning" come back at the end of the round). Each answer shows the full drug row and its essential knowledge. The **Drug list** tab is a searchable copy of the table. Missed questions are remembered in the browser so you can quiz only those.
+- **Quiz tab:** pick pages directly or tap a BDK quiz from the APC III Fall 2026 schedule (the next quiz is preselected by date). Choose decks (Cards, Select ALL, Essential Knowledge, Organisms) and, within Cards, the question types (brand, generic, pharmacologic category, classification, common indications).
+- **Modes:** multiple choice (4 options), written (with an "I was right" override), and flashcards (cards marked "Still learning" return at the end of the round). Missed questions are remembered in the browser.
+- **Drug list tab:** each page's table with its footer legend, searchable.
+- **Download:** `downloads/BDK_2026-2027_Quizlet_Decks.zip` holds the Quizlet import files and the build report.
 
-## Data
+## The decks
 
-`data/bdk.json` holds 300 drugs in 26 sections. Sections come from two editions of the list:
+Each source page gets its own files: `BDK_p<page>_<Section>_Cards.txt`, `_SelectALL.txt`, `_EssentialKnowledge.txt`, and `_Organisms.txt` on Infectious Diseases pages. One card per line, `Question<TAB>Answer`, UTF-8, LF line endings. In Quizlet, import with **Tab** between term and definition and **New line** between cards.
 
-| Edition | Sections |
-| --- | --- |
-| 2026-2027 (Revised May 2026) | Musculoskeletal, Endocrine 1, CNS 3–5, ID 1, GI 1–2, Pain/Heme/Onc 1 |
-| 2025-2026 (Revised May 2025) | DEENT 1–2, Pulmonary, Renal, CV 1–4, ID 2–4, Endocrine 2–3, CNS 1–2, Pain/Heme/Onc 2–3 |
-
-The quiz labels each section with its edition (sections from the older list carry a "25–26" tag).
-
-## Updating the list
-
-The data is extracted from the BDK PDFs with [pdfplumber](https://github.com/jsvine/pdfplumber):
+## Rebuilding from the PDF
 
 ```sh
 pip install pdfplumber
-# put the PDFs in a folder, list them in SOURCES at the top of tools/extract.py
-python3 tools/extract.py path/to/pdfs        # writes path/to/raw.json
-python3 tools/clean.py path/to/raw.json data/bdk.json
+python3 tools/extract.py 2026-2027-Basic-Drug-Knowledge-List.pdf pages.json
+python3 tools/extract.py 2025-2026-Basic-Drug-Knowledge-List.pdf pages_prior.json
+python3 tools/build.py pages.json pages_prior.json out/
+cp out/decks.json data/decks.json
+cp out/BDK_2026-2027_Quizlet_Decks.zip downloads/
 ```
 
-`extract.py` reads each table and resolves merged cells from the PDF's cell geometry. When a section appears in more than one PDF, the first file in `SOURCES` wins. `clean.py` fixes extraction artifacts (displaced subscripts such as "Alpha2", line-break hyphens, a font ligature) through an explicit replacement list, and prints any row that still looks wrong.
+- `extract.py` reads each page's table and its footer legend, and records which drugs share a merged cell (from the drawn cell rectangles), so a merged notes cell becomes one card naming every drug in it.
+- `norm.py` undoes text-extraction artifacts only (displaced subscripts such as "Alpha2", hyphens at line breaks, font ligatures).
+- `build.py` writes the decks, runs the audit (every drug present, one tab per line, no duplicates or empty fields, ONLY/ALL matching item counts, Select ALL groups of 2+), and writes `build_report.md` with card counts, abbreviation sources, items flagged for review, and differences from the prior-year list.
 
 ## Running locally
 

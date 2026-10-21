@@ -1,32 +1,48 @@
 (() => {
   'use strict';
 
-  // ---------- question types (wording from the BDK quiz schedule) ----------
-  const QTYPES = [
-    { id: 'brand', label: 'Brand name', term: 'Generic', field: 'brand',
-      ask: d => ['What is the brand name of ', d.generic, '?'],
-      answer: d => d.brand, ok: d => !!d.brand },
-    { id: 'generic', label: 'Generic name', term: 'Brand', field: 'generic',
-      ask: d => ['What is the generic name of ', d.brand, '?'],
-      answer: d => d.generic, ok: d => !!d.brand },
-    { id: 'category', label: 'Pharmacologic category', term: 'Generic', field: 'category',
-      ask: d => ['What is the pharmacologic category of ', d.generic, '?'],
-      answer: d => d.category, ok: d => !!d.category },
-    { id: 'indication', label: 'Common indication', term: 'Generic', field: 'indication',
-      ask: d => ['What is the common indication of ', d.generic, '?'],
-      answer: d => d.indication, ok: d => !!d.indication },
-    { id: 'classification', label: 'Classification', term: 'Generic', field: 'classification',
-      ask: d => ['What is the classification of ', d.generic, '?'],
-      answer: d => classOf(d), ok: () => true },
+  // ---------- deck structure (BDK Quizlet deck spec) ----------
+  const DECKS = [
+    { id: 'Cards', label: 'Cards' },
+    { id: 'SelectALL', label: 'Select ALL' },
+    { id: 'EssentialKnowledge', label: 'Essential Knowledge' },
+    { id: 'Organisms', label: 'Organisms (ID pages)' },
   ];
-  const QT = Object.fromEntries(QTYPES.map(t => [t.id, t]));
-  const CLASS_DEFAULTS = ['Rx only', 'OTC', 'CS-II', 'CS-III', 'CS-IV', 'CS-V'];
+  const CARD_KINDS = [
+    { id: 'brand', label: 'Brand name' },
+    { id: 'generic', label: 'Generic name' },
+    { id: 'category', label: 'Pharmacologic category' },
+    { id: 'classification', label: 'Classification' },
+    { id: 'indication', label: 'Common indications' },
+  ];
+  const KIND_LABEL = {
+    brand: 'Brand name', generic: 'Generic name', category: 'Pharmacologic category',
+    classification: 'Classification', indication: 'Common indications',
+    'sa-category': 'Select ALL · category', 'sa-classification': 'Select ALL · classification',
+    'sa-indication': 'Select ALL · indication', 'ek-kse': 'Key side effects', 'ek-bw': 'US boxed warnings',
+    'ek-notes': 'Other notes', organism: 'Organisms', 'sa-organism': 'Select ALL · organism',
+  };
 
-  // Section groups for the weekly BDK folders in Drive.
-  const PRESETS = [
-    { label: 'Week 3', ids: ['musculoskeletal', 'endocrine-1'] },
-    { label: 'Week 4', ids: ['cns-3', 'cns-4', 'cns-5'] },
-    { label: 'Week 5', ids: ['id-1', 'gi-1', 'gi-2', 'pain-heme-onc-1'] },
+  // BDK quiz schedule, PHAR 4232 APC III syllabus (Fall 2026, last updated 08/20/26).
+  // `until` is the last lab day of that week, so the next quiz can be preselected.
+  const QUIZZES = [
+    { label: 'Wk 2 · 8/25', pages: [11, 12, 13], until: '2026-08-27' },
+    { label: 'Wk 3 · 8/31', pages: [14, 15], until: '2026-08-31' },
+    { label: 'Wk 4 · 9/8', pages: [20, 21, 22], until: '2026-09-10' },
+    { label: 'Wk 5 · 9/14', pages: [10, 23, 24, 25], until: '2026-09-14' },
+    { label: 'Wk 6 · 9/21', pages: [6, 7, 8], until: '2026-09-21' },
+    { label: 'Wk 8 · 10/5', pages: [2, 3, 4], until: '2026-10-05' },
+    { label: 'Wk 10 · 10/20', pages: [16, 26, 27], until: '2026-10-22' },
+    { label: 'Wk 11 · 10/27', pages: [17, 18, 19], until: '2026-10-29' },
+    { label: 'Wk 14 · 11/17', pages: [5, 9], until: '2026-11-19' },
+  ];
+  const today = new Date().toISOString().slice(0, 10);
+  const nextQuiz = QUIZZES.findIndex(q => q.until >= today);
+
+  const GROUPS = [
+    ['DEENT', /^DEENT/], ['Renal', /^Renal/], ['Cardiovascular', /^CV/], ['Pulmonary', /^Pulmonary/],
+    ['Infectious diseases', /^ID/], ['Musculoskeletal', /^MSK/], ['Endocrine', /^Endo/],
+    ['Central nervous system', /^CNS/], ['Gastroenterology', /^GI/], ['Pain, heme, onc', /^PainHemeOnc/],
   ];
   const MODES = [
     { id: 'mc', label: 'Multiple choice' },
@@ -38,11 +54,11 @@
   // ---------- storage (per-browser conveniences only) ----------
   const store = {
     get(key, fallback) {
-      try { const v = localStorage.getItem('bdk:' + key); return v ? JSON.parse(v) : fallback; }
+      try { const v = localStorage.getItem('bdk2:' + key); return v ? JSON.parse(v) : fallback; }
       catch { return fallback; }
     },
     set(key, value) {
-      try { localStorage.setItem('bdk:' + key, JSON.stringify(value)); } catch { /* storage unavailable */ }
+      try { localStorage.setItem('bdk2:' + key, JSON.stringify(value)); } catch { /* storage unavailable */ }
     },
   };
 
@@ -50,7 +66,6 @@
   const $app = document.getElementById('app');
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const classOf = d => d.classification || 'Rx only';
   const shuffle = a => {
     const r = a.slice();
     for (let i = r.length - 1; i > 0; i--) {
@@ -60,8 +75,9 @@
     return r;
   };
   const norm = s => String(s).toLowerCase()
-    .replace(/\([^)]*\)/g, ' ').replace(/&|\+/g, ' and ').replace(/[^a-z0-9]+/g, '');
-  const qkey = q => q.drug.generic + '|' + q.type;
+    .replace(/\((?:po|iv|im|sq|sc|sl|pr|inh|topical|ophthalmic|intranasal|transdermal|[a-z, ]*)\)/g, ' ')
+    .replace(/&|\+/g, ' and ').replace(/[^a-z0-9]+/g, '');
+  const pageName = p => `p${p.page} · ${p.short.replace(/(\D)(\d)$/, '$1 $2').replace('PainHemeOnc', 'Pain/Heme/Onc')}`;
 
   function similarity(a, b) {
     if (a === b) return 1;
@@ -77,96 +93,86 @@
     return 1 - prev[b.length] / Math.max(a.length, b.length);
   }
 
-  // Individual names inside a brand cell such as "PO: Ambien, Ambien CR; SL: Edluar".
-  const brandNames = brand => brand.split(/[,;]/)
-    .map(s => s.replace(/^[^:]*:\s*/, '').trim()).filter(Boolean);
-  const listItems = s => s.toLowerCase().split(/[,;]/).map(x => x.trim()).filter(Boolean);
+  // "(#1) x; (#2) y" -> list markup; plain answers stay plain.
+  function answerHtml(a) {
+    const parts = a.split(/;\s*(?=\(#\d+\))/);
+    if (parts.length < 2) return esc(a);
+    return `<ol class="ans-list">${parts.map(p => `<li>${esc(p.replace(/^\(#\d+\)\s*/, ''))}</li>`).join('')}</ol>`;
+  }
 
-  function checkWritten(q, input) {
+  function checkWritten(c, input) {
     const given = norm(input);
     if (!given) return false;
-    const d = q.drug;
-    if (q.type === 'brand') return [d.brand, ...brandNames(d.brand)].some(b => norm(b) === given);
-    if (q.type === 'generic') return [d.generic, ...d.generic.split(/\),\s*/)].some(g => norm(g) === given);
-    return similarity(norm(q.answer), given) >= 0.8;
+    if (c.k === 'brand') {
+      const names = c.a.split(/[,;]/).map(s => s.replace(/^[^:]*:\s*/, '').trim());
+      return [c.a, ...names].some(n => norm(n) === given);
+    }
+    if (c.k === 'generic') return [c.a, ...c.a.split(/\),\s*/)].some(g => norm(g) === given);
+    return similarity(norm(c.a), given) >= 0.8;
   }
 
   // ---------- data ----------
-  let DATA = null;          // { sections: [...] }
-  let ALL = [];             // flat list of drugs with .section
-  const sectionById = {};
+  let DATA = null;
+  let PAGES = [];
+  let ALL = [];
+  const byPage = {};
 
   function loadData(json) {
     DATA = json;
+    PAGES = DATA.pages;
     ALL = [];
-    for (const s of DATA.sections) {
-      sectionById[s.id] = s;
-      for (const d of s.drugs) ALL.push(Object.assign(d, { section: s }));
+    for (const p of PAGES) {
+      byPage[p.page] = p;
+      p.cards.forEach((c, i) => { c.page = p; c.id = `${p.page}:${i}`; ALL.push(c); });
     }
   }
 
   // ---------- settings ----------
   const settings = Object.assign({
-    sections: [], types: QTYPES.map(t => t.id), mode: 'mc', count: 25, missedOnly: false,
+    pages: [], decks: DECKS.map(d => d.id), kinds: CARD_KINDS.map(k => k.id),
+    mode: 'mc', count: 25, missedOnly: false,
   }, store.get('settings', {}));
   const saveSettings = () => store.set('settings', settings);
   const stats = store.get('stats', {});
   const saveStats = () => store.set('stats', stats);
+  const statKey = c => c.page.page + '|' + c.q;
 
-  function record(q, correct) {
-    const s = stats[qkey(q)] || { right: 0, wrong: 0, last: 1 };
+  function record(c, correct) {
+    const s = stats[statKey(c)] || { right: 0, wrong: 0, last: 1 };
     correct ? s.right++ : s.wrong++;
     s.last = correct ? 1 : 0;
-    stats[qkey(q)] = s;
+    stats[statKey(c)] = s;
     saveStats();
   }
 
-  // ---------- question building ----------
+  function pool() {
+    const pages = new Set(settings.pages);
+    return ALL.filter(c => pages.has(c.page.page)
+      && settings.decks.includes(c.f)
+      && (c.f !== 'Cards' || settings.kinds.includes(c.k))
+      && (!settings.missedOnly || (stats[statKey(c)] && stats[statKey(c)].last === 0)));
+  }
   function buildQuestions() {
-    const chosen = new Set(settings.sections);
-    const qs = [];
-    for (const d of ALL) {
-      if (!chosen.has(d.section.id)) continue;
-      for (const t of settings.types) {
-        if (!QT[t].ok(d)) continue;
-        const q = { drug: d, type: t, answer: QT[t].answer(d) };
-        if (settings.missedOnly && !(stats[qkey(q)] && stats[qkey(q)].last === 0)) continue;
-        qs.push(q);
-      }
-    }
-    const s = shuffle(qs);
+    const s = shuffle(pool());
     return settings.count ? s.slice(0, settings.count) : s;
   }
 
-  function distractors(q) {
-    const t = QT[q.type];
-    const correct = norm(q.answer);
-    const correctItems = listItems(q.answer);
-    const pool = new Set(settings.sections);
+  function distractors(c) {
+    const pages = new Set(settings.pages);
     const tiers = [
-      ALL.filter(d => d.section === q.drug.section),
-      ALL.filter(d => pool.has(d.section.id)),
-      ALL,
+      ALL.filter(x => x.page === c.page && x.k === c.k),
+      ALL.filter(x => pages.has(x.page.page) && x.k === c.k),
+      ALL.filter(x => x.k === c.k),
     ];
-    const seen = new Set([correct]);
+    const seen = new Set([norm(c.a) || c.a]);
     const picks = [];
-    const consider = value => {
-      if (!value || picks.length >= 3) return;
-      const n = norm(value);
-      if (seen.has(n)) return;
-      if (q.type === 'indication') {
-        // A list that is a subset or superset of the right answer would also be "right".
-        const items = listItems(value);
-        if (items.every(i => correctItems.includes(i)) || correctItems.every(i => items.includes(i))) return;
-      }
-      seen.add(n);
-      picks.push(value);
-    };
     for (const tier of tiers) {
-      for (const d of shuffle(tier)) if (t.ok(d)) consider(t.answer(d));
+      for (const x of shuffle(tier)) {
+        const n = norm(x.a) || x.a;
+        if (picks.length < 3 && !seen.has(n)) { seen.add(n); picks.push(x.a); }
+      }
       if (picks.length >= 3) break;
     }
-    if (q.type === 'classification') shuffle(CLASS_DEFAULTS).forEach(consider);
     return picks;
   }
 
@@ -175,62 +181,54 @@
     document.querySelectorAll('.topbar nav [data-go]').forEach(b => b.classList.toggle('active', b.dataset.go === view));
   }
 
-  function promptHtml(q) {
-    const [pre, term, post] = QT[q.type].ask(q.drug);
-    return `${esc(pre)}<span class="hl">${esc(term)}</span>${esc(post)}`;
-  }
-
-  function drugCard(d, open = false) {
+  function rowCard(p, i, open = false) {
+    const d = p.drugs[i];
     const rows = [
-      ['Generic', d.generic],
-      ['Brand', d.brand || '—'],
-      ['Category', d.category || '—'],
-      ['Classification', classOf(d)],
-      ['Indication', d.indication || '—'],
+      ['Category', d.category], ['Generic', d.generic], ['Brand', d.brand],
+      ['Classification', d.classification || '—'], ['Indications', d.indication],
     ];
     if (d.activity) rows.push(['Activity against', d.activity]);
-    const notes = d.notes.length
-      ? `<details${open ? ' open' : ''}><summary>Essential knowledge</summary><ul>${
-        d.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul></details>`
-      : '';
-    return `<div class="drug"><dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>${notes}
-      <div class="src">${esc(d.section.title)} · BDK list ${esc(d.section.edition)}</div></div>`;
+    return `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
+      ${d.essential ? `<details${open ? ' open' : ''}><summary>Essential knowledge</summary><p class="ek">${esc(d.essential)}</p></details>` : ''}`;
+  }
+  function sourceBlock(c) {
+    const rows = c.d.length <= 2 ? c.d.map(i => rowCard(c.page, i)).join('<hr>') : '';
+    return `<div class="drug">${rows}<div class="src">${esc(pageName(c.page))} · ${esc(c.page.title)} · ${esc(c.f)} deck</div></div>`;
   }
 
   // Setup
   function viewSetup() {
     setNav('setup');
-    const groups = [];
-    for (const s of DATA.sections) {
-      const g = s.name.replace(/ \d$/, '');
-      let grp = groups.find(x => x.name === g);
-      if (!grp) groups.push(grp = { name: g, sections: [] });
-      grp.sections.push(s);
-    }
-    const selected = new Set(settings.sections);
-    const oldCount = DATA.sections.filter(s => !s.edition.startsWith('2026')).length;
+    const selected = new Set(settings.pages);
     const missedTotal = Object.values(stats).filter(s => s.last === 0).length;
+    const groups = GROUPS.map(([name, re]) => ({ name, pages: PAGES.filter(p => re.test(p.short)) }));
 
     $app.innerHTML = `
       <h1>Basic Drug Knowledge</h1>
-      <p class="sub">Pick sections and question types, then start. ${ALL.length} drugs in ${DATA.sections.length} sections.</p>
+      <p class="sub">${ALL.length} cards from ${PAGES.length} pages of the ${esc(DATA.edition)}.</p>
 
       <div class="card">
-        <div class="row spread"><h2>Sections</h2>
-          <div><button class="linkbtn" data-all>All</button><button class="linkbtn" data-none>None</button></div></div>
-        <div class="row">${PRESETS.map((p, i) => `<button class="chip" data-preset="${i}">${esc(p.label)}</button>`).join('')}</div>
-        ${groups.map(g => `<div class="group"><div class="group-label">${esc(g.name)}</div><div class="row">${
-          g.sections.map(s => `<button class="chip${s.edition.startsWith('2026') ? '' : ' old'}" data-sec="${s.id}"
-            aria-pressed="${selected.has(s.id)}" title="BDK list ${esc(s.edition)}">${esc(s.name)}
-            <span class="count">${s.drugs.length}</span></button>`).join('')}</div></div>`).join('')}
-        ${oldCount ? `<p class="note" style="margin-top:12px">Sections tagged <b>25–26</b> come from the 2025-2026 list because the
-          2026-2027 version of those pages is not in your Drive yet.</p>` : ''}
+        <h2>BDK quizzes (APC III schedule)</h2>
+        <div class="row">${QUIZZES.map((q, i) => `<button class="chip${i === nextQuiz ? ' next' : ''}" data-quiz="${i}" title="pages ${q.pages.join(', ')}">${esc(q.label)}
+          <span class="count">p${esc(q.pages.join(','))}</span></button>`).join('')}
+          <button class="chip" data-all>Cumulative</button></div>
       </div>
 
       <div class="card">
-        <h2>Question types</h2>
-        ${QTYPES.map(t => `<label class="check"><input type="checkbox" data-type="${t.id}" ${
-          settings.types.includes(t.id) ? 'checked' : ''}> ${esc(t.label)}</label>`).join('')}
+        <div class="row spread"><h2>Pages</h2>
+          <div><button class="linkbtn" data-all>All</button><button class="linkbtn" data-none>None</button></div></div>
+        ${groups.map(g => `<div class="group"><div class="group-label">${esc(g.name)}</div><div class="row">${
+          g.pages.map(p => `<button class="chip" data-page="${p.page}" aria-pressed="${selected.has(p.page)}"
+            title="${esc(p.title)}">${esc(pageName(p))}</button>`).join('')}</div></div>`).join('')}
+      </div>
+
+      <div class="card">
+        <h2>Decks</h2>
+        ${DECKS.map(d => `<label class="check"><input type="checkbox" data-deck="${d.id}" ${settings.decks.includes(d.id) ? 'checked' : ''}> ${esc(d.label)}</label>`).join('')}
+        <div class="indent" data-kinds>
+          <div class="group-label">Cards deck questions</div>
+          ${CARD_KINDS.map(k => `<label class="check"><input type="checkbox" data-kind="${k.id}" ${settings.kinds.includes(k.id) ? 'checked' : ''}> ${esc(k.label)}</label>`).join('')}
+        </div>
       </div>
 
       <div class="card">
@@ -245,31 +243,43 @@
       <div class="row spread">
         <span class="note" data-avail></span>
         <button class="primary" data-start>Start</button>
+      </div>
+
+      <div class="card" style="margin-top:20px">
+        <h2>Quizlet import files</h2>
+        <p class="note">One set of files per page (Cards, Select ALL, Essential Knowledge, and Organisms for ID pages),
+          tab-separated, one card per line. Import in Quizlet with <b>Tab</b> between term and definition and <b>New line</b> between cards.</p>
+        <p><a class="secondary" href="downloads/BDK_2026-2027_Quizlet_Decks.zip" download>Download all decks (.zip)</a></p>
       </div>`;
 
     const refresh = () => {
-      const n = buildQuestions().length;
-      $app.querySelector('[data-avail]').textContent = settings.sections.length
-        ? `${n} question${n === 1 ? '' : 's'} ready` : 'Pick at least one section';
+      const n = pool().length;
+      const shown = settings.count ? Math.min(n, settings.count) : n;
+      $app.querySelector('[data-avail]').textContent = settings.pages.length
+        ? `${shown} of ${n} cards` : 'Pick at least one page';
       $app.querySelector('[data-start]').disabled = !n;
+      $app.querySelector('[data-kinds]').style.display = settings.decks.includes('Cards') ? '' : 'none';
     };
-    const setSections = ids => {
-      settings.sections = ids;
+    const setPages = ids => {
+      settings.pages = ids;
       saveSettings();
-      $app.querySelectorAll('[data-sec]').forEach(b => b.setAttribute('aria-pressed', ids.includes(b.dataset.sec)));
+      $app.querySelectorAll('[data-page]').forEach(b => b.setAttribute('aria-pressed', ids.includes(+b.dataset.page)));
       refresh();
     };
 
-    $app.querySelectorAll('[data-sec]').forEach(b => b.onclick = () => {
-      const id = b.dataset.sec;
-      setSections(settings.sections.includes(id) ? settings.sections.filter(x => x !== id) : [...settings.sections, id]);
+    $app.querySelectorAll('[data-page]').forEach(b => b.onclick = () => {
+      const id = +b.dataset.page;
+      setPages(settings.pages.includes(id) ? settings.pages.filter(x => x !== id) : [...settings.pages, id]);
     });
-    $app.querySelector('[data-all]').onclick = () => setSections(DATA.sections.map(s => s.id));
-    $app.querySelector('[data-none]').onclick = () => setSections([]);
-    $app.querySelectorAll('[data-preset]').forEach(b => b.onclick = () => setSections(PRESETS[+b.dataset.preset].ids.slice()));
-    $app.querySelectorAll('[data-type]').forEach(c => c.onchange = () => {
-      settings.types = QTYPES.map(t => t.id).filter(id =>
-        $app.querySelector(`[data-type="${id}"]`).checked);
+    $app.querySelectorAll('[data-all]').forEach(b => b.onclick = () => setPages(PAGES.map(p => p.page)));
+    $app.querySelector('[data-none]').onclick = () => setPages([]);
+    $app.querySelectorAll('[data-quiz]').forEach(b => b.onclick = () => setPages(QUIZZES[+b.dataset.quiz].pages.slice()));
+    $app.querySelectorAll('[data-deck]').forEach(c => c.onchange = () => {
+      settings.decks = DECKS.map(d => d.id).filter(id => $app.querySelector(`[data-deck="${id}"]`).checked);
+      saveSettings(); refresh();
+    });
+    $app.querySelectorAll('[data-kind]').forEach(c => c.onchange = () => {
+      settings.kinds = CARD_KINDS.map(k => k.id).filter(id => $app.querySelector(`[data-kind="${id}"]`).checked);
       saveSettings(); refresh();
     });
     $app.querySelectorAll('[data-seg]').forEach(seg => seg.querySelectorAll('button').forEach(b => b.onclick = () => {
@@ -286,8 +296,8 @@
   // Session
   let session = null;
   function startSession(questions, mode) {
-    session = { mode, questions, i: 0, results: [] };
-    if (mode === 'mc') questions.forEach(q => { q.options = shuffle([q.answer, ...distractors(q)]); });
+    session = { mode, questions: questions.map(c => ({ c })), i: 0, results: [] };
+    if (mode === 'mc') session.questions.forEach(q => { q.options = shuffle([q.c.a, ...distractors(q.c)]); });
     renderQuestion();
   }
 
@@ -298,21 +308,23 @@
       <span>${right} correct</span></div>
       <div class="progress"><div style="width:${(i / questions.length) * 100}%"></div></div>`;
   }
+  const termLabel = c => `${esc(pageName(c.page))} · ${esc(KIND_LABEL[c.k] || c.f)}`;
 
   function renderQuestion() {
     if (session.i >= session.questions.length) return viewResults();
     setNav('');
     const q = session.questions[session.i];
-    if (session.mode === 'flash') return renderFlash(q);
-    const t = QT[q.type];
+    const c = q.c;
+    if (session.mode === 'flash') return renderFlash(c);
     $app.innerHTML = `${header()}
       <div class="card">
-        <p class="term-label">${esc(t.label)}</p>
-        <p class="prompt">${promptHtml(q)}</p>
+        <p class="term-label">${termLabel(c)}</p>
+        <p class="prompt">${esc(c.q)}</p>
         ${session.mode === 'mc'
-          ? `<div class="options">${q.options.map((o, k) => `<button class="opt" data-opt="${k}"><span class="key">${k + 1}</span><span>${esc(o)}</span></button>`).join('')}</div>`
+          ? `<div class="options${q.options.some(o => o.length > 60) ? ' long' : ''}">${q.options.map((o, k) =>
+              `<button class="opt" data-opt="${k}"><span class="key">${k + 1}</span><span>${answerHtml(o)}</span></button>`).join('')}</div>`
           : `<form class="written" data-form><input data-input autocomplete="off" autocapitalize="off" spellcheck="false"
-              placeholder="Type the ${esc(t.label.toLowerCase())}" aria-label="Your answer"><button class="primary">Check</button></form>`}
+              placeholder="Type your answer" aria-label="Your answer"><button class="primary">Check</button></form>`}
         <div data-feedback></div>
       </div>
       <div class="actions"><button class="secondary" data-quit>End quiz</button></div>`;
@@ -327,28 +339,27 @@
     }
   }
 
-  function showFeedback(q, correct, givenText, canOverride) {
+  function showFeedback(c, correct, givenText, canOverride) {
     const fb = $app.querySelector('[data-feedback]');
-    fb.innerHTML = `<div class="verdict ${correct ? 'good' : 'bad'}">${correct ? 'Correct' : 'Not quite'}
-        ${correct ? '' : `<span class="ans">Answer: ${esc(q.answer)}</span>`}</div>
-      ${drugCard(q.drug)}
+    fb.innerHTML = `<div class="verdict ${correct ? 'good' : 'bad'}"><span data-vtext>${correct ? 'Correct' : 'Not quite'}</span>
+        ${correct && session.mode === 'mc' ? '' : `<div class="ans">${answerHtml(c.a)}</div>`}</div>
+      ${sourceBlock(c)}
       <div class="actions">
         <button class="primary" data-next>Next <span class="hide-sm"><kbd>Enter</kbd></span></button>
         ${canOverride && !correct ? '<button class="secondary" data-override>I was right</button>' : ''}
       </div>`;
-    session.results.push({ q, correct, given: givenText });
-    record(q, correct);
+    session.results.push({ c, correct, given: givenText });
+    record(c, correct);
     session.answered = true;
     const next = fb.querySelector('[data-next]');
     next.focus();
     next.onclick = () => { session.i++; session.answered = false; renderQuestion(); };
     const ov = fb.querySelector('[data-override]');
     if (ov) ov.onclick = () => {
-      const r = session.results[session.results.length - 1];
-      r.correct = true;
-      record(q, true);
+      session.results[session.results.length - 1].correct = true;
+      record(c, true);
       fb.querySelector('.verdict').className = 'verdict good';
-      fb.querySelector('.verdict').firstChild.textContent = 'Counted as correct ';
+      fb.querySelector('[data-vtext]').textContent = 'Counted as correct';
       ov.remove();
       next.focus();
     };
@@ -358,33 +369,30 @@
     if (session.answered) return;
     const q = session.questions[session.i];
     const choice = q.options[k];
-    const correct = choice === q.answer;
     $app.querySelectorAll('[data-opt]').forEach(b => {
       const o = q.options[+b.dataset.opt];
       b.disabled = true;
-      if (o === q.answer) b.classList.add('correct');
+      if (o === q.c.a) b.classList.add('correct');
       else if (+b.dataset.opt === k) b.classList.add('wrong');
     });
-    showFeedback(q, correct, choice, false);
+    showFeedback(q.c, choice === q.c.a, choice, false);
   }
 
   function answerWritten(text) {
     if (session.answered || !text.trim()) return;
-    const q = session.questions[session.i];
-    const input = $app.querySelector('[data-input]');
-    input.disabled = true;
+    const c = session.questions[session.i].c;
+    $app.querySelector('[data-input]').disabled = true;
     $app.querySelector('[data-form] button').disabled = true;
-    showFeedback(q, checkWritten(q, text), text, true);
+    showFeedback(c, checkWritten(c, text), text, true);
   }
 
-  function renderFlash(q) {
-    const t = QT[q.type];
+  function renderFlash(c) {
     $app.innerHTML = `${header()}
       <div class="flash" data-card tabindex="0" role="button" aria-label="Flip card">
         <div class="flash-inner">
-          <div class="face"><p class="term-label" style="text-align:center">${esc(t.label)}</p>
-            <div class="big">${promptHtml(q)}</div><div class="hint">Tap to flip <span class="hide-sm">· <kbd>Space</kbd></span></div></div>
-          <div class="face back"><div class="big">${esc(q.answer)}</div>${drugCard(q.drug)}</div>
+          <div class="face"><p class="term-label" style="text-align:center">${termLabel(c)}</p>
+            <div class="big">${esc(c.q)}</div><div class="hint">Tap to flip <span class="hide-sm">· <kbd>Space</kbd></span></div></div>
+          <div class="face back"><div class="big">${answerHtml(c.a)}</div>${sourceBlock(c)}</div>
         </div>
       </div>
       <div class="actions">
@@ -393,11 +401,12 @@
         <button class="secondary" data-quit>End</button>
       </div>`;
     const card = $app.querySelector('[data-card]');
-    const sizeToBack = () => {
-      const back = card.querySelector('.back');
-      card.style.minHeight = card.querySelector('.flash-inner').style.minHeight = Math.max(260, back.scrollHeight) + 'px';
+    const size = () => {
+      const h = Math.max(260, ...[...card.querySelectorAll('.face')].map(f => f.scrollHeight));
+      card.style.minHeight = card.querySelector('.flash-inner').style.minHeight = h + 'px';
     };
-    card.onclick = e => { if (!e.target.closest('summary')) { card.classList.toggle('flipped'); sizeToBack(); } };
+    size();
+    card.onclick = e => { if (!e.target.closest('summary')) { card.classList.toggle('flipped'); size(); } };
     $app.querySelector('[data-know]').onclick = () => flashAnswer(true);
     $app.querySelector('[data-learning]').onclick = () => flashAnswer(false);
     $app.querySelector('[data-quit]').onclick = viewResults;
@@ -405,10 +414,10 @@
 
   function flashAnswer(known) {
     const q = session.questions[session.i];
-    session.results.push({ q, correct: known });
-    record(q, known);
-    // Like Quizlet: cards you are still learning come back at the end of the round.
-    if (!known) session.questions.push(q);
+    session.results.push({ c: q.c, correct: known });
+    record(q.c, known);
+    // Like Quizlet: cards still being learned come back at the end of the round.
+    if (!known) session.questions.push({ c: q.c });
     session.i++;
     renderQuestion();
   }
@@ -416,9 +425,8 @@
   // Results
   function viewResults() {
     setNav('');
-    // Score each question once, by its first attempt.
     const firstTry = new Map();
-    for (const r of session.results) if (!firstTry.has(r.q)) firstTry.set(r.q, r);
+    for (const r of session.results) if (!firstTry.has(r.c)) firstTry.set(r.c, r);
     const results = [...firstTry.values()];
     const right = results.filter(r => r.correct).length;
     const missed = results.filter(r => !r.correct);
@@ -435,44 +443,46 @@
         </div>
       </div>
       ${missed.length ? `<div class="card"><h2>Missed (${missed.length})</h2><ul class="missed">${missed.map(r => `
-        <li><div class="q">${promptHtml(r.q)}</div>
-          ${r.given ? `<div class="you">You: ${esc(r.given)}</div>` : ''}
-          <div class="right">Answer: ${esc(r.q.answer)}</div></li>`).join('')}</ul></div>` : ''}`;
+        <li><div class="q">${esc(r.c.q)}</div>
+          ${r.given ? `<div class="you">You: ${answerHtml(r.given)}</div>` : ''}
+          <div class="right">Answer: ${answerHtml(r.c.a)}</div></li>`).join('')}</ul></div>` : ''}`;
     const retry = $app.querySelector('[data-retry]');
-    if (retry) retry.onclick = () => startSession(shuffle(missed.map(r => ({ drug: r.q.drug, type: r.q.type, answer: r.q.answer }))), session.mode);
+    if (retry) retry.onclick = () => startSession(shuffle(missed.map(r => r.c)), session.mode);
     $app.querySelector('[data-again]').onclick = () => startSession(buildQuestions(), settings.mode);
     $app.querySelector('[data-setup]').onclick = viewSetup;
   }
 
-  // Browse
+  // Browse: the list laid out page by page, like the PDF
   function viewBrowse() {
     setNav('browse');
     $app.innerHTML = `<h1>Drug list</h1>
-      <p class="sub">Search any column. Tap a row for essential knowledge.</p>
+      <p class="sub">${esc(DATA.edition)}, page by page. Search any column; tap a row for essential knowledge.</p>
       <input class="search" data-q type="search" placeholder="Search generic, brand, category, indication…" aria-label="Search">
-      <div class="table-wrap"><table><thead><tr><th>Generic</th><th>Brand</th><th>Category</th><th>Class.</th><th>Indication</th></tr></thead>
-      <tbody data-body></tbody></table></div>`;
+      <div data-body></div>`;
     const body = $app.querySelector('[data-body]');
     const render = term => {
       const t = term.trim().toLowerCase();
       let html = '';
-      for (const s of DATA.sections) {
-        const rows = s.drugs.filter(d => !t || [d.generic, d.brand, d.category, d.indication, classOf(d), d.activity]
-          .some(v => (v || '').toLowerCase().includes(t)));
+      for (const p of PAGES) {
+        const rows = p.drugs.map((d, i) => [d, i]).filter(([d]) => !t || [d.generic, d.brand, d.category, d.classification,
+          d.indication, d.activity, d.essential].some(v => (v || '').toLowerCase().includes(t)));
         if (!rows.length) continue;
-        html += `<tr class="section-row"><td colspan="5">${esc(s.title)}<span class="ed">BDK list ${esc(s.edition)}</span></td></tr>`;
-        html += rows.map(d => `<tr data-id="${d.id}" style="cursor:pointer"><td>${esc(d.generic)}</td><td>${esc(d.brand || '—')}</td>
-          <td>${esc(d.category || '—')}</td><td>${esc(classOf(d))}</td><td>${esc(d.indication || '—')}</td></tr>`).join('');
+        html += `<section class="pagetable"><h2>${esc(pageName(p))} <span class="ed">${esc(p.title)}</span></h2>
+          <div class="table-wrap"><table><thead><tr><th>Pharmacologic category</th><th>Generic</th><th>Brand</th><th>Class.</th><th>Common indications</th></tr></thead><tbody>
+          ${rows.map(([d, i]) => `<tr data-p="${p.page}" data-i="${i}"><td>${esc(d.category)}</td><td>${esc(d.generic)}</td>
+            <td>${esc(d.brand)}</td><td>${esc(d.classification || '')}</td><td>${esc(d.indication)}${d.activity ? `<div class="act">Activity against: ${esc(d.activity)}</div>` : ''}</td></tr>`).join('')}
+          </tbody></table></div>${p.legend ? `<p class="legend">${esc(p.legend)}</p>` : ''}</section>`;
       }
-      body.innerHTML = html || '<tr><td colspan="5">No matches</td></tr>';
+      body.innerHTML = html || '<p class="note">No matches</p>';
     };
     body.onclick = e => {
-      const tr = e.target.closest('tr[data-id]');
+      const tr = e.target.closest('tr[data-i]');
       if (!tr) return;
       const nxt = tr.nextElementSibling;
       if (nxt && nxt.classList.contains('detail')) return nxt.remove();
-      const d = ALL.find(x => String(x.id) === tr.dataset.id);
-      tr.insertAdjacentHTML('afterend', `<tr class="detail"><td colspan="5">${drugCard(d, true)}</td></tr>`);
+      const p = byPage[tr.dataset.p];
+      const d = p.drugs[+tr.dataset.i];
+      tr.insertAdjacentHTML('afterend', `<tr class="detail"><td colspan="5"><p class="ek">${esc(d.essential || '—')}</p></td></tr>`);
     };
     const input = $app.querySelector('[data-q]');
     input.oninput = () => render(input.value);
@@ -505,12 +515,12 @@
   // ---------- boot ----------
   const boot = json => {
     loadData(json);
-    if (!settings.sections.length) settings.sections = [DATA.sections[0].id];
-    settings.sections = settings.sections.filter(id => sectionById[id]);
+    settings.pages = settings.pages.filter(n => byPage[n]);
+    if (!settings.pages.length) settings.pages = (QUIZZES[nextQuiz] || { pages: PAGES.map(p => p.page) }).pages.slice();
     viewSetup();
   };
   if (window.BDK_DATA) boot(window.BDK_DATA);
-  else fetch('data/bdk.json').then(r => r.json()).then(boot).catch(() => {
-    $app.innerHTML = '<div class="warnbox">The drug list could not be loaded.</div>';
+  else fetch('data/decks.json').then(r => r.json()).then(boot).catch(() => {
+    $app.innerHTML = '<div class="warnbox">The decks could not be loaded.</div>';
   });
 })();
