@@ -398,3 +398,7 @@ tr[data-i] { cursor: pointer; }
 .listview { margin: 0 0 12px; }
 .pdfpage { display: block; background: #fff; border: 1px solid var(--border); border-top: 0; border-radius: 0 0 var(--radius) var(--radius); overflow: hidden; }
 .pdfpage img { display: block; width: 100%; height: auto; }
+
+/* Cram answer chooser */
+.bannerlabel { margin: 12px 0 6px; font-weight: 600; }
+.seg.cramfmt { flex-wrap: wrap; }

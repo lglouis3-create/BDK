@@ -417,7 +417,7 @@
   const saved = store.get('settings', {});
   const settings = Object.assign({
     pages: [], topics: TOPIC_PRESETS[0].topics.slice(), selectAll: true, mode: 'learn', count: 25,
-    filter: 'all', autoscroll: true, matchType: 'names', labDay: null, cramMin: 30,
+    filter: 'all', autoscroll: true, matchType: 'names', labDay: null, cramMin: 30, cramFmt: 'mixed',
   }, saved);
   if (saved.kinds && !saved.topics) {   // settings from the deck/question-type version
     const kinds = new Set([...(saved.kinds || []), ...(saved.decks || []).flatMap(d => ({
@@ -963,6 +963,8 @@
         <button class="secondary" data-bq="match">Match</button>
         <button class="secondary" data-bq="pdf">PDF pages</button>
       </div>
+      <p class="note bannerlabel">Cram answers with:</p>
+      ${cramFmtSeg()}
       <p class="note">Quiz ${days <= 0 ? 'today' : 'tomorrow'}: Cram works through the cards you don't know yet; Last look is a one-page list of your weakest cards to read right before the quiz.${days === 1 ? ' If you study tonight, sleep soon after: sleep shortly after learning helps you keep it.' : ''}</p>`
       : `<div class="actions">
         <button class="primary" data-bq="learn">Learn these pages</button>
@@ -987,6 +989,11 @@
       else if (mode === 'cram') startCram(cards, cur.q);
       else if (mode === 'last') viewLastLook(cur.q);
       else startSession(interleave(cards).slice(0, 25), mode);
+    });
+    root.querySelectorAll('[data-seg="cramFmt"] button').forEach(b => b.onclick = () => {
+      settings.cramFmt = b.dataset.val;
+      saveSettings();
+      root.querySelectorAll('[data-seg="cramFmt"] button').forEach(x => x.setAttribute('aria-pressed', x.dataset.val === settings.cramFmt));
     });
     root.querySelectorAll('[data-labday]').forEach(b => b.onclick = () => {
       settings.labDay = settings.labDay === b.dataset.labday ? null : b.dataset.labday;
@@ -1056,6 +1063,9 @@
         <div data-cramonly>
           <h2 style="margin-top:16px">Time you have</h2>
           <div class="seg" data-seg="cramMin">${[15, 30, 60, 90].map(m => `<button data-val="${m}" aria-pressed="${settings.cramMin === m}">${m} min</button>`).join('')}</div>
+          <h2 style="margin-top:16px">Answer with</h2>
+          ${cramFmtSeg()}
+          <p class="note" data-cramfmt-hint></p>
         </div>
         <div data-matchonly>
           <h2 style="margin-top:16px">Pairs</h2>
@@ -1096,7 +1106,8 @@
       if (isCram) {
         const plan = cramPlan(pool('all'));
         $app.querySelector('[data-avail]').textContent = !settings.pages.length ? 'Pick at least one page'
-          : plan.cards.length ? `${plan.cards.length} cards in ~${settings.cramMin} min${plan.skipped ? ` · skips ${plan.skipped} you know well` : ''}` : 'You know every card here well';
+          : plan.cards.length ? `${plan.cards.length} cards in ~${settings.cramMin} min${plan.skipped ? ` · skips ${plan.skipped} you know well` : ''}` : settings.cramFmt === 'selectall' ? 'No weak Select ALL cards here' : 'You know every card here well';
+        $app.querySelector('[data-cramfmt-hint]').textContent = CRAM_HINT[settings.cramFmt];
         start.disabled = !plan.cards.length;
         return;
       }
@@ -1146,7 +1157,8 @@
     $app.querySelectorAll('[data-seg]').forEach(seg => seg.querySelectorAll('button').forEach(b => b.onclick = () => {
       const key = seg.dataset.seg;
       settings[key] = key === 'count' || key === 'cramMin' ? +b.dataset.val : b.dataset.val;
-      seg.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b));
+      // the banner and step 3 both show the Cram answer chooser; keep every copy in sync
+      $app.querySelectorAll(`[data-seg="${key}"] button`).forEach(x => x.setAttribute('aria-pressed', x.dataset.val === String(settings[key])));
       saveSettings(); refresh();
     }));
     $app.querySelector('[data-start]').onclick = () => {
@@ -1509,7 +1521,30 @@
   // repetitions apart within the session (one big stack) beats short gaps. So: skip cards that
   // are already strong, show each unfamiliar card once, then test it at growing gaps.
   const CRAM_SECONDS_PER_CARD = 30;   // about three short exposures per card
+  // How Cram asks each card. Mixed: multiple choice first, then recall. A list answer is always
+  // checkboxes (typing a whole list is not practical); a long answer in Written is self-graded.
+  const CRAM_FORMATS = [
+    { id: 'mixed', label: 'Mixed' }, { id: 'choice', label: 'Multiple choice' },
+    { id: 'selectall', label: 'Select ALL' }, { id: 'written', label: 'Written' },
+  ];
+  const CRAM_HINT = {
+    mixed: 'Multiple choice the first time, then recall (typed or self-graded) the second time.',
+    choice: 'Every question is multiple choice; list answers are checkboxes.',
+    selectall: 'Only questions with a list answer (Select ALL and lists), answered with checkboxes.',
+    written: 'Type the answer. List answers stay checkboxes; long answers: think of it, then check yourself.',
+  };
+  const isList = c => !!(c.items && c.items.length > 1);
+  function cramFormat(item) {
+    const c = item.c, f = settings.cramFmt;
+    if (isList(c) || f === 'selectall') return 'multi';
+    if (item.phase === 'look' || f === 'choice') return 'mc';   // a guess at an unseen card is multiple choice
+    if (f === 'written') return formatFor(c, 'written');
+    return item.tests === 0 ? 'mc' : recallFormat(c);
+  }
+  const cramFmtSeg = () => `<div class="seg cramfmt" data-seg="cramFmt" aria-label="Answer with">${CRAM_FORMATS.map(f =>
+    `<button data-val="${f.id}" aria-pressed="${settings.cramFmt === f.id}">${f.label}</button>`).join('')}</div>`;
   function cramPlan(cards, quizDate) {
+    if (settings.cramFmt === 'selectall') cards = cards.filter(isList);
     const t = today();
     const date = quizDate || t;
     const strong = c => recallOn(c, date) >= 0.9 && !missedLast(c);
@@ -1555,7 +1590,7 @@
       $app.innerHTML = `${cramHead()}<div class="card" data-q></div>`;
       $app.querySelector('[data-quit]').onclick = cramDone;
       const q = $app.querySelector('[data-q]');
-      active = mountQuestion(q, c, c.items && c.items.length > 1 ? 'multi' : 'mc', ok => {
+      active = mountQuestion(q, c, cramFormat(item), ok => {
         item.phase = 'test'; item.looked = true; item.hw = Math.max(item.hw, 1);
         const after = q.querySelector('[data-after]');
         after.innerHTML = `<p class="note">${ok ? 'Nice.' : 'A wrong guess is fine: it does not count against you.'} You get tested on this in a few cards.</p>
@@ -1571,7 +1606,7 @@
       q.querySelector('.prompt').after(note);
       return;
     }
-    const fmt = item.tests === 0 && !(c.items && c.items.length > 1) ? 'mc' : recallFormat(c);
+    const fmt = cramFormat(item);
     $app.innerHTML = `${cramHead()}<div class="card" data-q></div>`;
     $app.querySelector('[data-quit]').onclick = cramDone;
     active = mountQuestion($app.querySelector('[data-q]'), c, fmt, (ok, given) => {
@@ -1595,7 +1630,7 @@
       next.focus({ preventScroll: true });
       next.onclick = () => { renderCram(); window.scrollTo(0, 0); };
       active.next = () => next.click();
-    }, { tag: item.tests === 0 ? 'Quick check' : 'Recall', onOverride: () => { undoMiss(c); S.missed.delete(c); } });
+    }, { tag: fmt === 'mc' || fmt === 'multi' ? (item.tests === 0 ? 'Quick check' : 'Check') : 'Recall', onOverride: () => { undoMiss(c); S.missed.delete(c); } });
   }
   function cramDone() {
     const S = session;
