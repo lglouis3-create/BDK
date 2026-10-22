@@ -540,17 +540,67 @@
   }
 
   // ====================================================================== shared pieces
+  // ====================================================================== tap-to-define medical terms
+  let GLOSS = new Map();     // lowercased term or alias -> entry
+  let glossRe = null;
+  const isAbbr = t => /^[A-Z][A-Z0-9]+[a-z]?$/.test(t) && t.length <= 5;   // EPS, SJS, QTc: case must match
+  function loadGlossary(list) {
+    GLOSS = new Map();
+    for (const e of list || []) for (const t of [e.t, ...(e.a || [])]) GLOSS.set(t.toLowerCase().replace(/’/g, "'"), { ...e, abbr: isAbbr(t) ? t : null });
+    const keys = [...GLOSS.keys()].sort((a, b) => b.length - a.length)
+      .map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/'/g, "['’]").replace(/ /g, '\\s+'));
+    glossRe = keys.length ? new RegExp(`(?<![\\w-])(${keys.join('|')})(?![\\w-])`, 'gi') : null;
+  }
+  // Escapes text and wraps known medical terms in a button that shows a definition.
+  function gloss(text) {
+    text = String(text ?? '');
+    if (!glossRe) return esc(text);
+    let out = '', last = 0;
+    for (const m of text.matchAll(glossRe)) {
+      const e = GLOSS.get(m[0].toLowerCase().replace(/’/g, "'").replace(/\s+/g, ' '));
+      if (!e || (e.abbr && m[0] !== e.abbr)) continue;
+      out += esc(text.slice(last, m.index)) + `<button type="button" class="term" data-term="${esc(e.t)}">${esc(m[0])}</button>`;
+      last = m.index + m[0].length;
+    }
+    return out + esc(text.slice(last));
+  }
+  const glossByTerm = t => [...GLOSS.values()].find(e => e.t === t);
+  const termPop = document.createElement('div');
+  termPop.className = 'termpop';
+  termPop.hidden = true;
+  termPop.setAttribute('role', 'dialog');
+  document.body.appendChild(termPop);
+  function closeTerm() { termPop.hidden = true; }
+  function openTerm(btn) {
+    const e = glossByTerm(btn.dataset.term);
+    if (!e) return;
+    const url = `https://vsearch.nlm.nih.gov/vivisimo/cgi-bin/query-meta?v%3Aproject=medlineplus&v%3Asources=medlineplus-bundle&query=${encodeURIComponent(e.t)}`;
+    termPop.innerHTML = `<div class="termpop-in"><div class="row spread"><b>${esc(e.t)}</b><button type="button" class="linkbtn" data-term-close aria-label="Close">✕</button></div>
+      <p>${esc(e.d)}</p><a href="${url}" target="_blank" rel="noopener">Look it up on MedlinePlus ↗</a></div>`;
+    termPop.setAttribute('aria-label', e.t);
+    termPop.hidden = false;
+    termPop.querySelector('[data-term-close]').onclick = closeTerm;
+  }
+  // Capture phase, so tapping a term inside a clickable row opens the definition only.
+  document.addEventListener('click', ev => {
+    const b = ev.target.closest && ev.target.closest('[data-term]');
+    if (b) { ev.preventDefault(); ev.stopPropagation(); openTerm(b); return; }
+    if (!termPop.hidden && !termPop.contains(ev.target)) closeTerm();
+  }, true);
+  document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && !termPop.hidden) { closeTerm(); ev.stopPropagation(); } }, true);
+
   function answerHtml(a, c) {
     if (c && c.resolved) {
       return `${esc(a)} <span class="note">— the shared list on ${esc(pageName(c.resolvedFrom))}:</span>
-        <ul class="ans-list">${c.resolved.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`;
+        <ul class="ans-list">${c.resolved.map(x => `<li>${gloss(x)}</li>`).join('')}</ul>`;
     }
+    const t = c ? gloss : esc;
     const parts = splitDepth0(a, '; ');
     if (/^\(#1\)/.test(a) && parts.length > 1) {
-      return `<ol class="ans-list">${parts.map(p => `<li>${esc(p.replace(/^\(#\d+\)\s*/, ''))}</li>`).join('')}</ol>`;
+      return `<ol class="ans-list">${parts.map(p => `<li>${t(p.replace(/^\(#\d+\)\s*/, ''))}</li>`).join('')}</ol>`;
     }
-    if (c && c.f === 'EssentialKnowledge' && parts.length > 1) return `<ul class="ans-list">${parts.map(p => `<li>${esc(p)}</li>`).join('')}</ul>`;
-    return esc(a);
+    if (c && c.f === 'EssentialKnowledge' && parts.length > 1) return `<ul class="ans-list">${parts.map(p => `<li>${gloss(p)}</li>`).join('')}</ul>`;
+    return t(a);
   }
   const classmates = d => d.page.drugs.filter(x => x.category && x.category === d.category);
   // Essential knowledge in sections. Side effects every drug in the class shares are grayed,
@@ -561,9 +611,9 @@
     const mates = classmates(d).filter(x => x !== d);
     const classShared = it => mates.length > 0 && mates.every(m => m.facts.kse.includes(it));
     const qual = it => { const m = it.match(/^(\([^)]*\)) (.*)$/); return m ? [m[1].slice(1, -1), m[2]] : ['', it]; };
-    const kse = f.kse.map(it => { const [q, t] = qual(it); return `<li class="${classShared(it) ? 'cls' : 'own'}">${q ? `<span class="qual">${esc(q)}</span> ` : ''}${esc(t)}</li>`; }).join('');
-    const bw = f.bw.map(it => { const [q, t] = qual(it); return `<li>${q ? `<span class="qual">${esc(q)}</span> ` : ''}${esc(t)}</li>`; }).join('');
-    const notes = f.notes.map(it => { const [q, t] = qual(it); return `<li>${q ? `<span class="qual">${esc(q)}</span> ` : ''}${esc(t)}</li>`; }).join('');
+    const kse = f.kse.map(it => { const [q, t] = qual(it); return `<li class="${classShared(it) ? 'cls' : 'own'}">${q ? `<span class="qual">${esc(q)}</span> ` : ''}${gloss(t)}</li>`; }).join('');
+    const bw = f.bw.map(it => { const [q, t] = qual(it); return `<li>${q ? `<span class="qual">${esc(q)}</span> ` : ''}${gloss(t)}</li>`; }).join('');
+    const notes = f.notes.map(it => { const [q, t] = qual(it); return `<li>${q ? `<span class="qual">${esc(q)}</span> ` : ''}${gloss(t)}</li>`; }).join('');
     const anyShared = mates.length && f.kse.some(classShared);
     return `<div class="ekbox">
       ${kse ? `<div class="eksec"><h4>Key side effects</h4><ul class="sechips">${kse}</ul>${anyShared ? `<p class="note">Gray = shared by every ${esc(d.category)} on this page; bold = this drug's own.</p>` : ''}</div>` : ''}
@@ -571,7 +621,13 @@
       ${notes ? `<div class="eksec"><h4>Other notes</h4><ul>${notes}</ul></div>` : ''}
     </div>`;
   }
-  function rowCard(p, i, open = false) {
+  // Which row of the drug's list entry a question kind asks about.
+  const ASKED_ROW = {
+    brand: 'Brand', generic: 'Generic', category: 'Category', 'sa-category': 'Category', classification: 'Classification',
+    'sa-classification': 'Classification', indication: 'Indications', 'sa-indication': 'Indications', organism: 'Activity against', 'sa-organism': 'Activity against',
+  };
+  const ROW_KEY = { Category: 'cat', Indications: 'ind' };
+  function rowCard(p, i, open = false, kind = '') {
     const d = p.drugs[i];
     const rows = [
       ['Category', d.category], ['Generic', d.generic], ['Brand', d.brand],
@@ -579,12 +635,16 @@
     ];
     if (d.activity) rows.push(['Activity against', d.activity]);
     const ek = ekHtml(d);
-    return `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
+    const asked = ASKED_ROW[kind];
+    return `<dl>${rows.map(([k, v]) => {
+      const cls = [ROW_KEY[k] ? `k-${ROW_KEY[k]}` : '', k === asked ? 'asked' : ''].filter(Boolean).join(' ');
+      return `<dt${cls ? ` class="${cls}"` : ''}>${k}</dt><dd${cls ? ` class="${cls}"` : ''}>${k === 'Indications' ? gloss(v) : esc(v)}</dd>`;
+    }).join('')}</dl>
       ${ek ? `<details${open ? ' open' : ''}><summary>Essential knowledge</summary>${ek}</details>` : ''}`;
   }
   function sourceBlock(c) {
     const ekCard = c.f === 'EssentialKnowledge' || c.k === 'ek-which';
-    const rows = c.d.length <= 2 ? c.d.map(i => rowCard(c.page, i, ekCard)).join('<hr>') : '';
+    const rows = c.d.length <= 2 ? c.d.map(i => rowCard(c.page, i, ekCard, c.k)).join('<hr>') : '';
     let cmp = '';
     if (c.d.length === 1) {
       const d = c.page.drugs[c.d[0]];
@@ -597,7 +657,8 @@
     }
     return `<div class="drug">${rows}${cmp}<div class="src">${dot(c.page)}${esc(pageName(c.page))} · ${esc(c.page.title)}</div></div>`;
   }
-  const termLabel = c => `<span class="pchip" style="--pc:${c.page.color}">${esc(pageName(c.page))}</span> ${esc(KIND_LABEL[c.k] || c.f)}`;
+  const kindClass = k => (ROW_KEY[ASKED_ROW[k]] ? ` class="k-${ROW_KEY[ASKED_ROW[k]]}"` : '');
+  const termLabel = c => `<span class="pchip" style="--pc:${c.page.color}">${esc(pageName(c.page))}</span> <span${kindClass(c.k)}>${esc(KIND_LABEL[c.k] || c.f)}</span>`;
 
   // ====================================================================== "what you picked" on a wrong answer
   const KIND_NOUN = {
@@ -1695,8 +1756,8 @@
         if (lists.every(l => !l.length)) return '';
         const shared = new Set(lists[0].filter(x => lists.every(l => l.includes(x))));
         const same = lists.every(l => l.length === lists[0].length && l.every(x => shared.has(x)));
-        return `<tr class="${same ? 'same' : ''}"><th scope="row">${label}${same ? '<span class="samebadge">same</span>' : ''}</th>${lists.map(l =>
-          `<td>${l.length ? `<ul>${l.map(x => `<li class="${shared.has(x) ? 'shared' : 'diff'}">${esc(x)}</li>`).join('')}</ul>` : '<span class="note">—</span>'}</td>`).join('')}</tr>`;
+        return `<tr class="${same ? 'same' : ''}"><th scope="row"${key === 'cat' || key === 'ind' ? ` class="k-${key}"` : ''}>${label}${same ? '<span class="samebadge">same</span>' : ''}</th>${lists.map(l =>
+          `<td>${l.length ? `<ul>${l.map(x => `<li class="${shared.has(x) ? 'shared' : 'diff'}">${gloss(x)}</li>`).join('')}</ul>` : '<span class="note">—</span>'}</td>`).join('')}</tr>`;
       }).join('');
       table = `<div class="card">
         <div class="row spread"><h2>Side by side</h2>
@@ -1945,9 +2006,9 @@
           d.indication, d.activity, d.essential].some(v => (v || '').toLowerCase().includes(tq)));
         if (!rows.length) continue;
         html += `<section class="pagetable" id="pg${p.page}"><h2 class="pagehead" style="--pc:${p.color}">${esc(p.title)} <span class="ed">p${p.page}</span></h2>
-          <div class="table-wrap"><table><thead><tr><th>Pharmacologic category</th><th>Generic</th><th>Brand</th><th>Class.</th><th>Common indications</th></tr></thead><tbody>
+          <div class="table-wrap"><table><thead><tr><th class="k-cat">Pharmacologic category</th><th>Generic</th><th>Brand</th><th>Class.</th><th class="k-ind">Common indications</th></tr></thead><tbody>
           ${rows.map(d => `<tr data-ref="${d.ref}" tabindex="0"><td>${esc(d.category)}</td><td>${esc(d.generic)}</td>
-            <td>${esc(d.brand)}</td><td>${esc(d.classification || '')}</td><td>${esc(d.indication)}${d.activity ? `<div class="act">Activity against: ${esc(d.activity)}</div>` : ''}</td></tr>`).join('')}
+            <td>${esc(d.brand)}</td><td>${esc(d.classification || '')}</td><td>${gloss(d.indication)}${d.activity ? `<div class="act">Activity against: ${esc(d.activity)}</div>` : ''}</td></tr>`).join('')}
           </tbody></table></div>${p.legend ? `<p class="legend">${esc(p.legend)}</p>` : ''}</section>`;
       }
       body.innerHTML = html || '<p class="note">No matches</p>';
@@ -2024,8 +2085,10 @@
   };
   // Read-only hook for automated tests (only with ?debug in the URL).
   if (/[?&]debug\b/.test(location.search)) window.__bdk = { card: id => byId[id], session: () => session, all: () => ALL };
-  if (window.BDK_DATA) boot(window.BDK_DATA);
-  else fetch('data/decks.json').then(r => r.json()).then(boot).catch(() => {
+  // The glossary is optional: the app still runs if it fails to load.
+  const glossary = fetch('data/glossary.json').then(r => r.json()).then(loadGlossary).catch(() => {});
+  if (window.BDK_DATA) glossary.then(() => boot(window.BDK_DATA));
+  else Promise.all([fetch('data/decks.json').then(r => r.json()), glossary]).then(([json]) => boot(json)).catch(() => {
     $app.innerHTML = '<div class="warnbox">The decks could not be loaded. Check your connection and reload.</div>';
   });
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
