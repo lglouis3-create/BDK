@@ -2,25 +2,27 @@
   'use strict';
 
   // ====================================================================== constants
-  const DECKS = [
-    { id: 'Cards', label: 'Cards' },
-    { id: 'SelectALL', label: 'Select ALL' },
-    { id: 'EssentialKnowledge', label: 'Essential Knowledge' },
-    { id: 'Organisms', label: 'Organisms (ID pages)' },
+  // Plain-language topics; each covers question kinds from the Quizlet decks.
+  const TOPICS = [
+    { id: 'names', label: 'Brand ↔ generic', kinds: ['brand', 'generic'] },
+    { id: 'class', label: 'Drug class', kinds: ['category', 'sa-category'] },
+    { id: 'ind', label: 'Indications', kinds: ['indication', 'sa-indication'] },
+    { id: 'rx', label: 'Rx / OTC / schedule', kinds: ['classification', 'sa-classification'] },
+    { id: 'safety', label: 'Side effects & boxed warnings', kinds: ['ek-kse', 'ek-bw', 'ek-which'] },
+    { id: 'notes', label: 'Other notes', kinds: ['ek-notes'] },
+    { id: 'org', label: 'Organisms (ID pages)', kinds: ['organism', 'sa-organism'] },
   ];
-  const CARD_KINDS = [
-    { id: 'brand', label: 'Brand name' },
-    { id: 'generic', label: 'Generic name' },
-    { id: 'category', label: 'Pharmacologic category' },
-    { id: 'classification', label: 'Classification' },
-    { id: 'indication', label: 'Common indications' },
+  const TOPIC_PRESETS = [
+    { label: 'BDK quiz questions', topics: ['names', 'class', 'ind', 'rx'], hint: 'The five question types on the BDK quiz schedule: brand, generic, category, indication, classification.' },
+    { label: 'Everything', topics: TOPICS.map(t => t.id) },
+    { label: 'Safety only', topics: ['safety', 'notes'] },
   ];
   const KIND_LABEL = {
-    brand: 'Brand name', generic: 'Generic name', category: 'Pharmacologic category',
-    classification: 'Classification', indication: 'Common indications',
-    'sa-category': 'Select ALL · category', 'sa-classification': 'Select ALL · classification',
+    brand: 'Brand name', generic: 'Generic name', category: 'Drug class', classification: 'Rx / OTC / schedule',
+    indication: 'Indications', 'sa-category': 'Select ALL · drug class', 'sa-classification': 'Select ALL · Rx / OTC',
     'sa-indication': 'Select ALL · indication', 'ek-kse': 'Key side effects', 'ek-bw': 'US boxed warnings',
     'ek-notes': 'Other notes', organism: 'Organisms', 'sa-organism': 'Select ALL · organism',
+    'ek-which': 'Which drug? · side effect or warning',
   };
   // Header colors sampled from the BDK PDF pages.
   const SYSTEM_COLOR = {
@@ -46,22 +48,30 @@
     { label: 'Cumulative', start: '2026-11-30', until: '2026-11-30', pages: 'all', calcs: 'Cumulative BDK/Calcs Assessment' },
   ];
   const MODES = [
-    { id: 'learn', label: 'Learn', hint: 'Adaptive rounds: multiple choice first, then recall, until each card is right twice.' },
+    { id: 'learn', label: 'Learn', hint: 'New cards: multiple choice, then recall twice. Cards you know: one recall. Misses come back later in the round.' },
     { id: 'mc', label: 'Test', hint: 'One question at a time. List answers use checkboxes.' },
     { id: 'scroll', label: 'Scroll', hint: 'All questions on one page; answer and keep scrolling.' },
-    { id: 'written', label: 'Written', hint: 'Type each answer.' },
+    { id: 'written', label: 'Written', hint: 'Type each answer; long answers use a self-check.' },
     { id: 'flash', label: 'Flashcards', hint: 'Flip cards and sort them into Know it / Still learning.' },
+    { id: 'match', label: 'Match', hint: 'Tap matching pairs as fast as you can. A wrong pair adds 1 second.' },
   ];
   const FILTERS = [
-    { id: 'all', label: 'All cards' },
+    { id: 'all', label: 'All' },
     { id: 'due', label: 'Due for review' },
     { id: 'missed', label: 'Missed last time' },
     { id: 'new', label: 'Not studied yet' },
   ];
+  const MATCH_TYPES = [
+    { id: 'names', label: 'Generic ↔ brand' },
+    { id: 'class', label: 'Drug ↔ class' },
+    { id: 'ind', label: 'Drug ↔ indications' },
+  ];
   const COUNTS = [10, 25, 50, 0];
-  const INTERVALS = [0, 1, 2, 4, 7, 14];   // days until next review, by box
   const THEMES = ['auto', 'light', 'dark', 'blue'];
   const SHORT_KINDS = new Set(['brand', 'generic', 'classification', 'organism', 'category', 'indication']);
+  const ROUND = 7;              // Learn round size
+  const NEW_PER_DAY = 20;       // new cards suggested in today's plan
+  const LEECH = 4;              // misses before a card is flagged as a trouble card
 
   // ====================================================================== small helpers
   const $app = document.getElementById('app');
@@ -79,6 +89,7 @@
     .replace(/\((?:po|iv|im|sq|sc|sl|pr|inh|topical|ophthalmic|intranasal|transdermal|[a-z, ]*)\)/g, ' ')
     .replace(/&|\+/g, ' and ').replace(/[^a-z0-9]+/g, '');
   const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+  const uniq = a => [...new Set(a)];
 
   const dayStr = d => {
     const z = new Date(d);
@@ -129,13 +140,13 @@
 
   // ====================================================================== theme
   const themeBtn = document.querySelector('[data-theme-toggle]');
+  const THEME_NAME = { auto: 'Auto', light: 'Light', dark: 'Dark', blue: 'Blue' };
   function applyTheme(t) {
-    const resolved = t === 'auto'
-      ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'blue' : 'light') : t;
+    const resolved = t === 'auto' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'blue' : 'light') : t;
     document.documentElement.dataset.theme = resolved;
     if (themeBtn) {
-      themeBtn.textContent = { auto: 'Auto', light: 'Light', dark: 'Dark', blue: 'Blue' }[t];
-      themeBtn.setAttribute('aria-label', `Theme: ${themeBtn.textContent}. Change theme`);
+      themeBtn.querySelector('[data-theme-name]').textContent = THEME_NAME[t];
+      themeBtn.setAttribute('aria-label', `Theme: ${THEME_NAME[t]}. Tap to change.`);
     }
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.content = getComputedStyle(document.documentElement).getPropertyValue('--surface').trim() || '#ffffff';
@@ -155,6 +166,7 @@
   let ALL = [];
   const byPage = {};
   const byId = {};
+  const KIND_TO_TOPIC = Object.fromEntries(TOPICS.flatMap(t => t.kinds.map(k => [k, t.id])));
 
   function itemsOf(c) {
     if (/^\(#1\) /.test(c.a)) return splitDepth0(c.a, '; ').map(s => s.replace(/^\(#\d+\)\s*/, ''));
@@ -164,6 +176,7 @@
     }
     return null;
   }
+  const EK_Q = /^What (?:is|are) the (Key Side Effects?|US Boxed Warnings?|Other Notes?)(?: (\([^)]*\)))? (?:of|for) /;
 
   function loadData(json) {
     DATA = json;
@@ -173,61 +186,186 @@
       byPage[p.page] = p;
       p.sys = p.short.replace(/\d+$/, '');
       p.color = SYSTEM_COLOR[p.sys] || '#999';
+      p.drugs.forEach((d, i) => {
+        d.ref = `${p.page}:${i}`;
+        d.page = p;
+        d.i = i;
+        d.facts = { kse: [], bw: [], notes: [], ind: [], org: [], cls: [] };
+        d.cards = [];
+        // "generic (Brand1, Brand2)" -> name parts for Match
+        const m = d.label.match(/^(.*) \(([^()]*(?:\([^()]*\)[^()]*)*)\)$/);
+        d.short = d.brand && d.brand !== '---' && m ? m[1] : d.label;
+        d.brandNames = d.brand && d.brand !== '---' && m ? m[2] : '';
+      });
       p.cards.forEach(c => {
         c.page = p;
         c.id = `${p.page}|${c.q}`;
         c.items = itemsOf(c);
+        c.topic = KIND_TO_TOPIC[c.k];
         byId[c.id] = c;
         ALL.push(c);
+        for (const di of c.d) p.drugs[di].cards.push(c);
+        // structured facts per drug, for Compare
+        const list = c.items || [c.a];
+        if (c.k === 'indication') c.d.forEach(di => { p.drugs[di].facts.ind = list; });
+        else if (c.k === 'classification') c.d.forEach(di => { p.drugs[di].facts.cls = list; });
+        else if (c.k === 'category') c.d.forEach(di => { p.drugs[di].facts.cat = c.a; });
+        else if (c.k === 'organism') c.d.forEach(di => { p.drugs[di].facts.org = list; });
+        else if (c.f === 'EssentialKnowledge') {
+          const m = c.q.match(EK_Q);
+          if (!m) return;
+          const key = m[1].startsWith('Key') ? 'kse' : m[1].startsWith('US') ? 'bw' : 'notes';
+          const q = m[2] ? `${m[2]} ` : '';
+          const its = (c.items || [c.a]).map(x => q + x);
+          c.d.forEach(di => p.drugs[di].facts[key].push(...its));
+        }
       });
     }
+    resolveSeeAbove();
+    for (const p of PAGES) generateWhichCards(p);
     for (const q of QUIZZES) if (q.pages === 'all') q.pages = PAGES.map(p => p.page);
   }
+  // "US Boxed Warnings (all opioid analgesics): See above" on p25-26 points to the shared list on p25.
+  function resolveSeeAbove() {
+    const shared = {};
+    for (const p of PAGES) for (const d of p.drugs) for (const it of d.facts.bw) {
+      const m = it.match(/^(\([^)]*\)) (.*)$/);
+      if (m && !/^See above/i.test(m[2])) (shared[m[1]] = shared[m[1]] || { page: p, items: new Set() }).items.add(m[2]);
+    }
+    for (const c of ALL) {
+      if (c.k !== 'ek-bw' || !/^See above/i.test(c.a)) continue;
+      const q = (c.q.match(EK_Q) || [])[2];
+      if (q && shared[q]) { c.resolved = [...shared[q].items]; c.resolvedFrom = shared[q].page; }
+    }
+    for (const p of PAGES) for (const d of p.drugs) {
+      d.facts.bw = d.facts.bw.flatMap(it => {
+        const m = it.match(/^(\([^)]*\)) See above/i);
+        return m && shared[m[1]] ? [...shared[m[1]].items].map(x => `${m[1]} ${x}`) : [it];
+      });
+    }
+  }
+  // Reverse questions for distinctive facts: a side effect or boxed warning that only 1-2 drugs
+  // on the page have is the cue that tells those drugs apart from their neighbors.
+  function generateWhichCards(p) {
+    const withEk = p.drugs.filter(d => d.facts.kse.length || d.facts.bw.length);
+    if (withEk.length < 3) return;
+    const strip = x => x.replace(/^\([^)]*\) /, '');
+    for (const [key, word] of [['bw', 'US boxed warning'], ['kse', 'key side effect']]) {
+      const owners = new Map();
+      for (const d of p.drugs) for (const it of uniq(d.facts[key].map(strip))) {
+        if (/^(no major side effects|see above)/i.test(it)) continue;
+        owners.set(it, [...(owners.get(it) || []), d]);
+      }
+      for (const [it, ds] of owners) {
+        if (ds.length > 2 || (key === 'kse' && ds.length === withEk.length)) continue;
+        const single = ds.length === 1;
+        const c = {
+          f: 'Generated', k: 'ek-which', d: ds.map(d => d.i), page: p, topic: 'safety',
+          q: single ? `On p${p.page}, which drug has the ${word}: ${it}?` : `On p${p.page}, select ALL drugs with the ${word}: ${it}`,
+          a: single ? ds[0].label : ds.map((d, i) => `(#${i + 1}) ${d.label}`).join('; '),
+        };
+        c.id = `${p.page}|${c.q}`;
+        c.items = itemsOf(c);
+        byId[c.id] = c;
+        ALL.push(c);
+        p.cards.push(c);
+        ds.forEach(d => d.cards.push(c));
+      }
+    }
+  }
+  const drugByRef = ref => { const [pg, i] = ref.split(':'); return byPage[pg] && byPage[pg].drugs[+i]; };
   const pageName = p => `p${p.page} · ${p.short.replace(/(\D)(\d)$/, '$1 $2').replace('PainHemeOnc', 'Pain/Heme/Onc')}`;
   const dot = p => `<span class="pdot" style="--pc:${p.color}" aria-hidden="true"></span>`;
 
-  // ====================================================================== progress model
-  // cards: { id: { n, r, w, streak, box, due, okDay, last, h: [1,0,..] } }, days: { date: { n, c } }
-  const PROGRESS = store.get('progress', null) || migrateOldStats();
-  function migrateOldStats() {
-    const p = { v: 3, cards: {}, days: {} };
-    const old = store.get('stats', {});
-    for (const [k, s] of Object.entries(old)) {
-      p.cards[k] = { n: s.right + s.wrong, r: s.right, w: s.wrong, streak: s.last ? 1 : 0,
-        box: s.last ? 1 : 0, due: today(), last: 0, h: [s.last] };
+  // ====================================================================== memory model (FSRS-4.5)
+  // Forgetting curve R(t,S) = (1 + 19/81 * t/S)^-0.5; with 90% target retention the interval equals S.
+  // Default parameters and update formulas from the open-spaced-repetition wiki ("The Algorithm").
+  const W = [0.4872, 1.4003, 3.7145, 13.8206, 5.1618, 1.2298, 0.8975, 0.031, 1.6474, 0.1367,
+    1.0461, 2.1072, 0.0793, 0.3246, 1.587, 0.2272, 2.8755];
+  const DECAY = -0.5, FACTOR = 19 / 81, RETENTION = 0.9;
+  const clampD = d => Math.min(10, Math.max(1, d));
+  const D0 = g => clampD(W[4] - (g - 3) * W[5]);
+  const recall = (t, S) => Math.pow(1 + FACTOR * Math.max(0, t) / S, DECAY);
+  const intervalDays = S => Math.max(1, Math.round((S / FACTOR) * (Math.pow(RETENTION, 1 / DECAY) - 1)));
+  function fsrs(m, g, t) {
+    if (!m) return { S: W[g - 1], D: D0(g) };
+    const r = recall(t, m.S);
+    const D = clampD(W[7] * D0(3) + (1 - W[7]) * (m.D - W[6] * (g - 3)));
+    let S;
+    if (g === 1) {
+      S = Math.min(m.S, W[11] * Math.pow(m.D, -W[12]) * (Math.pow(m.S + 1, W[13]) - 1) * Math.exp(W[14] * (1 - r)));
+    } else {
+      S = m.S * (Math.exp(W[8]) * (11 - m.D) * Math.pow(m.S, -W[9]) * (Math.exp(W[10] * (1 - r)) - 1)
+        * (g === 2 ? W[15] : 1) * (g === 4 ? W[16] : 1) + 1);
+    }
+    return { S: Math.max(0.1, S), D };
+  }
+
+  // ====================================================================== progress store
+  // cards: { id: { n, r, w, streak, lapses, S, D, day, due, last, h:[1,0..], prev } }
+  // days: { date: { n, c } }   confusions: { "refA|refB": count }   match: { key: bestSeconds }
+  const PROGRESS = loadProgress();
+  function loadProgress() {
+    const p = store.get('progress', null) || { cards: {}, days: {} };
+    if (!p.cards) p.cards = {};
+    if (!p.days) p.days = {};
+    p.confusions = p.confusions || {};
+    p.match = p.match || {};
+    if (p.v !== 4) {   // older versions: rebuild the memory fields from the answer history
+      const old = store.get('stats', {});
+      for (const [k, s] of Object.entries(old)) if (!p.cards[k]) p.cards[k] = { n: s.right + s.wrong, r: s.right, w: s.wrong, h: [s.last] };
+      for (const s of Object.values(p.cards)) {
+        if (s.S) continue;
+        const lastOk = s.h && s.h[s.h.length - 1] === 1;
+        s.S = lastOk ? [1, 1, 2, 4, 7, 14][s.box || 1] || 1 : 0.5;
+        s.D = 5;
+        s.day = s.okDay || (s.last ? dayStr(s.last) : today());
+        s.due = lastOk ? addDays(s.day, intervalDays(s.S)) : s.day;
+        s.lapses = s.lapses || 0;
+        s.streak = s.streak || (lastOk ? 1 : 0);
+        delete s.box; delete s.okDay; delete s.prev;
+      }
+      p.v = 4;
     }
     return p;
   }
   const saveProgress = () => store.set('progress', PROGRESS);
   const cs = c => PROGRESS.cards[c.id];
-
-  function nextQuizFor(pageNo, after) {
-    return QUIZZES.find(q => q.start > after && q.pages.includes(pageNo));
+  // Lab-week quizzes run over several lab days; with a lab day chosen, use that student's own date.
+  const WEEKDAY = { tue: 2, wed: 3, thu: 4 };
+  const isLabWeek = q => q.start !== q.until;
+  function myDate(q) {
+    if (!isLabWeek(q) || !settings.labDay) return q.start;
+    for (let d = q.start; d <= q.until; d = addDays(d, 1)) if (new Date(d + 'T12:00:00').getDay() === WEEKDAY[settings.labDay]) return d;
+    return q.start;
   }
+  const lastDay = q => (isLabWeek(q) && settings.labDay ? myDate(q) : q.until);
+  const nextQuizFor = (pageNo, after) => QUIZZES.find(q => myDate(q) > after && q.pages.includes(pageNo));
 
+  // Pass/fail grading: a right answer is "Good" (3), a miss is "Again" (1).
   function record(c, ok) {
     const t = today();
-    const s = PROGRESS.cards[c.id] || { n: 0, r: 0, w: 0, streak: 0, box: 0, due: t, last: 0, h: [] };
-    const { prev, ...before } = s;           // one-step snapshot so "I was right" can undo a miss
+    const s = PROGRESS.cards[c.id] || { n: 0, r: 0, w: 0, streak: 0, lapses: 0, h: [] };
+    const { prev, ...before } = s;
     s.prev = s.n ? JSON.parse(JSON.stringify(before)) : null;
     s.n++;
     s.last = Date.now();
-    s.h = [...(s.h || []), ok ? 1 : 0].slice(-8);
-    if (ok) {
-      s.r++;
-      s.streak++;
-      if (s.okDay !== t) { s.box = Math.min(s.box + 1, INTERVALS.length - 1); s.okDay = t; }
-      let due = addDays(t, INTERVALS[s.box]);
-      // Pull the review in to the day before the quiz that covers this page.
-      const q = nextQuizFor(c.page.page, t);
-      if (q && due >= q.start) due = [addDays(t, 1), addDays(q.start, -1)].sort().pop();
-      s.due = due;
-    } else {
-      s.w++;
-      s.streak = 0;
-      s.box = 0;
-      s.due = t;
+    s.h = [...(s.h || []), ok ? 1 : 0].slice(-10);
+    if (ok) { s.r++; s.streak++; } else { s.w++; s.streak = 0; if (s.S) s.lapses = (s.lapses || 0) + 1; }
+    // Only the first answer of a day changes memory strength; later answers that day are practice.
+    if (s.day !== t) {
+      const m = s.S ? { S: s.S, D: s.D } : null;
+      const nm = fsrs(m, ok ? 3 : 1, s.day ? daysBetween(s.day, t) : 0);
+      s.S = nm.S;
+      s.D = nm.D;
+      s.day = t;
     }
+    if (ok) {
+      let due = addDays(t, intervalDays(s.S));
+      const q = nextQuizFor(c.page.page, t);
+      if (q && due >= myDate(q)) due = [addDays(t, 1), addDays(myDate(q), -1)].sort().pop();
+      s.due = due;
+    } else s.due = t;
     PROGRESS.cards[c.id] = s;
     const d = PROGRESS.days[t] || { n: 0, c: 0 };
     d.n++;
@@ -235,7 +373,7 @@
     PROGRESS.days[t] = d;
     saveProgress();
   }
-  function undoMiss(c) {   // "I was right" override on a written answer
+  function undoMiss(c) {   // "I was right" on a typed answer
     const s = cs(c);
     if (!s) return;
     if (s.prev) PROGRESS.cards[c.id] = s.prev; else delete PROGRESS.cards[c.id];
@@ -243,57 +381,92 @@
     if (d) d.n--;
     record(c, true);
   }
+  function confuse(refA, refB) {
+    if (!refA || !refB || refA === refB) return;
+    const k = [refA, refB].sort().join('|');
+    PROGRESS.confusions[k] = (PROGRESS.confusions[k] || 0) + 1;
+    saveProgress();
+  }
+  const lastRight = s => s.h.length && s.h[s.h.length - 1] === 1;
+  // new -> learning -> familiar (holds 2+ days) -> mastered (holds 7+ days at 90% recall)
   const stateOf = c => {
     const s = cs(c);
     if (!s || !s.n) return 'new';
-    return s.streak >= 2 ? 'mastered' : 'learning';
+    if (!lastRight(s)) return 'learning';
+    return s.S >= 7 ? 'mastered' : s.S >= 2 ? 'familiar' : 'learning';
   };
   const isDue = c => { const s = cs(c); return !!s && s.n > 0 && s.due <= today(); };
-  const missedLast = c => { const s = cs(c); return !!s && s.h.length && s.h[s.h.length - 1] === 0; };
+  const missedLast = c => { const s = cs(c); return !!s && s.n > 0 && !lastRight(s); };
+  const recallOn = (c, date) => { const s = cs(c); return s && s.S ? recall(daysBetween(s.day, date), s.S) : 0; };
 
-  function summarize(cards) {
-    const out = { total: cards.length, new: 0, learning: 0, mastered: 0, due: 0, r: 0, w: 0 };
+  function summarize(cards, onDate) {
+    const out = { total: cards.length, new: 0, learning: 0, familiar: 0, mastered: 0, due: 0, r: 0, w: 0, rsum: 0 };
     for (const c of cards) {
       out[stateOf(c)]++;
       if (isDue(c)) out.due++;
       const s = cs(c);
       if (s) { out.r += s.r; out.w += s.w; }
+      if (onDate) out.rsum += recallOn(c, onDate);
     }
+    out.predicted = cards.length ? Math.round((out.rsum / cards.length) * 100) : 0;
     return out;
   }
 
   // ====================================================================== settings & pools
+  const saved = store.get('settings', {});
   const settings = Object.assign({
-    pages: [], decks: DECKS.map(d => d.id), kinds: CARD_KINDS.map(k => k.id),
-    mode: 'learn', count: 25, filter: 'all', checkboxes: true, autoscroll: true,
-  }, store.get('settings', {}));
-  if (settings.missedOnly) { settings.filter = 'missed'; delete settings.missedOnly; }
+    pages: [], topics: TOPIC_PRESETS[0].topics.slice(), selectAll: true, mode: 'learn', count: 25,
+    filter: 'all', autoscroll: true, matchType: 'names', labDay: null,
+  }, saved);
+  if (saved.kinds && !saved.topics) {   // settings from the deck/question-type version
+    const kinds = new Set([...(saved.kinds || []), ...(saved.decks || []).flatMap(d => ({
+      SelectALL: ['sa-category', 'sa-indication', 'sa-classification'], EssentialKnowledge: ['ek-kse', 'ek-bw', 'ek-notes'],
+      Organisms: ['organism', 'sa-organism'] }[d] || []))]);
+    settings.topics = TOPICS.filter(t => t.kinds.some(k => kinds.has(k))).map(t => t.id);
+    if (!settings.topics.length) settings.topics = TOPIC_PRESETS[0].topics.slice();
+  }
+  for (const k of ['kinds', 'decks', 'checkboxes', 'missedOnly']) delete settings[k];
   const saveSettings = () => store.set('settings', settings);
 
-  function pool() {
+  const topicKinds = () => new Set(TOPICS.filter(t => settings.topics.includes(t.id)).flatMap(t => t.kinds)
+    .filter(k => settings.selectAll || !k.startsWith('sa-')));
+  function pool(filter = settings.filter) {
     const pages = new Set(settings.pages);
-    const f = {
-      all: () => true, due: isDue, missed: missedLast, new: c => stateOf(c) === 'new',
-    }[settings.filter] || (() => true);
-    return ALL.filter(c => pages.has(c.page.page)
-      && settings.decks.includes(c.f)
-      && (c.f !== 'Cards' || settings.kinds.includes(c.k))
-      && f(c));
+    const kinds = topicKinds();
+    const f = { all: () => true, due: isDue, missed: missedLast, new: c => stateOf(c) === 'new' }[filter] || (() => true);
+    return ALL.filter(c => pages.has(c.page.page) && kinds.has(c.k) && f(c));
   }
-  // Learn order: due reviews, then missed, then new, then the rest; mastered last.
+  // Learn order: most-forgotten reviews first, then missed, then new; well-known cards last.
   function learnOrder(cards) {
-    const rank = c => (isDue(c) ? 0 : missedLast(c) ? 1 : stateOf(c) === 'new' ? 2 : stateOf(c) === 'learning' ? 3 : 4);
+    const t = today();
+    const rank = c => (isDue(c) ? recallOn(c, t) : missedLast(c) ? 1.5 : stateOf(c) === 'new' ? 2 : 3 + recallOn(c, t));
     return shuffle(cards).sort((a, b) => rank(a) - rank(b));
   }
-  function pick(cards, count) {
-    const ordered = settings.mode === 'learn' ? learnOrder(cards) : shuffle(cards);
+  // Mix question kinds and pages so similar cards are practiced side by side (interleaving).
+  const interleave = cards => shuffle(cards);
+  function pick(cards, count, mode = settings.mode) {
+    const ordered = mode === 'learn' ? learnOrder(cards) : interleave(cards);
     return count ? ordered.slice(0, count) : ordered;
   }
 
   // ====================================================================== answer options
+  function confusedRefs(c) {
+    if (c.d.length !== 1) return [];
+    const ref = c.page.drugs[c.d[0]].ref;
+    return Object.keys(PROGRESS.confusions).filter(k => k.split('|').includes(ref))
+      .map(k => k.split('|').find(r => r !== ref));
+  }
   function distractors(c) {
+    if (c.k === 'ek-which') {   // other drugs on the same page, look-alikes you confused first
+      const conf = confusedRefs(c).map(drugByRef).filter(d => d && d.page === c.page).map(d => d.label);
+      return uniq([...shuffle(conf), ...shuffle(c.page.drugs.map(d => d.label))]).filter(l => l !== c.a).slice(0, 3);
+    }
     const pages = new Set(settings.pages);
+    // Answers you have mixed up with this drug come first: they are the comparisons that need practice.
+    const confused = confusedRefs(c).map(drugByRef).filter(Boolean)
+      .flatMap(d => d.cards.filter(x => x.k === c.k && x.d.length === 1));
     const tiers = [
+      confused,
       ALL.filter(x => x.page === c.page && x.k === c.k),
       ALL.filter(x => pages.has(x.page.page) && x.k === c.k),
       ALL.filter(x => x.k === c.k),
@@ -319,7 +492,7 @@
       const n = norm(baseLabel(v));
       if (picks.length < want && n && !have.has(n)) { have.add(n); picks.push(v); }
     };
-    if (c.k.startsWith('sa-')) {
+    if (c.k.startsWith('sa-') || c.k === 'ek-which') {
       // Drugs from this page first; when every drug on the page is correct, borrow from the same body system.
       shuffle(c.page.drugs.map(d => d.label)).forEach(consider);
       shuffle(PAGES.filter(p => p !== c.page && p.sys === c.page.sys).flatMap(p => p.drugs.map(d => d.label))).forEach(consider);
@@ -347,26 +520,55 @@
       return [c.a, ...names].some(n => norm(n) === given);
     }
     if (c.k === 'generic') return [c.a, ...c.a.split(/\),\s*/)].some(g => norm(g) === given);
+    if (c.k === 'ek-which') {
+      const d = c.page.drugs[c.d[0]];
+      return [d.label, d.short, d.generic, ...(d.brandNames || '').split(',')].some(n => n && norm(n) === given);
+    }
     return similarity(norm(c.a), given) >= 0.8;
   }
 
-  // Which question format a card gets.
-  function formatFor(c, mode, stage = 0) {
+  function recallFormat(c) {
+    if (c.items && c.items.length > 1) return 'multi';
+    if (c.k === 'ek-which') return 'written';
+    return SHORT_KINDS.has(c.k) && c.a.length <= 60 ? 'written' : 'self';
+  }
+  function formatFor(c, mode) {
     const list = c.items && c.items.length > 1;
-    if (mode === 'learn') {
-      if (stage === 0) return 'mc';
-      if (list) return 'multi';
-      return SHORT_KINDS.has(c.k) && c.a.length <= 60 ? 'written' : 'self';
-    }
     if (mode === 'written') return list ? 'multi' : c.a.length <= 80 ? 'written' : 'self';
-    return list && settings.checkboxes ? 'multi' : 'mc';
+    return list ? 'multi' : 'mc';
   }
 
   // ====================================================================== shared pieces
-  function answerHtml(a) {
+  function answerHtml(a, c) {
+    if (c && c.resolved) {
+      return `${esc(a)} <span class="note">— the shared list on ${esc(pageName(c.resolvedFrom))}:</span>
+        <ul class="ans-list">${c.resolved.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`;
+    }
     const parts = splitDepth0(a, '; ');
-    if (!/^\(#1\)/.test(a) || parts.length < 2) return esc(a);
-    return `<ol class="ans-list">${parts.map(p => `<li>${esc(p.replace(/^\(#\d+\)\s*/, ''))}</li>`).join('')}</ol>`;
+    if (/^\(#1\)/.test(a) && parts.length > 1) {
+      return `<ol class="ans-list">${parts.map(p => `<li>${esc(p.replace(/^\(#\d+\)\s*/, ''))}</li>`).join('')}</ol>`;
+    }
+    if (c && c.f === 'EssentialKnowledge' && parts.length > 1) return `<ul class="ans-list">${parts.map(p => `<li>${esc(p)}</li>`).join('')}</ul>`;
+    return esc(a);
+  }
+  const classmates = d => d.page.drugs.filter(x => x.category && x.category === d.category);
+  // Essential knowledge in sections. Side effects every drug in the class shares are grayed,
+  // so what is specific to this drug stands out.
+  function ekHtml(d) {
+    const f = d.facts;
+    if (!f.kse.length && !f.bw.length && !f.notes.length) return '';
+    const mates = classmates(d).filter(x => x !== d);
+    const classShared = it => mates.length > 0 && mates.every(m => m.facts.kse.includes(it));
+    const qual = it => { const m = it.match(/^(\([^)]*\)) (.*)$/); return m ? [m[1].slice(1, -1), m[2]] : ['', it]; };
+    const kse = f.kse.map(it => { const [q, t] = qual(it); return `<li class="${classShared(it) ? 'cls' : 'own'}">${q ? `<span class="qual">${esc(q)}</span> ` : ''}${esc(t)}</li>`; }).join('');
+    const bw = f.bw.map(it => { const [q, t] = qual(it); return `<li>${q ? `<span class="qual">${esc(q)}</span> ` : ''}${esc(t)}</li>`; }).join('');
+    const notes = f.notes.map(it => { const [q, t] = qual(it); return `<li>${q ? `<span class="qual">${esc(q)}</span> ` : ''}${esc(t)}</li>`; }).join('');
+    const anyShared = mates.length && f.kse.some(classShared);
+    return `<div class="ekbox">
+      ${kse ? `<div class="eksec"><h4>Key side effects</h4><ul class="sechips">${kse}</ul>${anyShared ? `<p class="note">Gray = shared by every ${esc(d.category)} on this page; bold = this drug's own.</p>` : ''}</div>` : ''}
+      ${bw ? `<div class="eksec bwsec"><h4>⚠ US boxed warning${f.bw.length > 1 ? 's' : ''}</h4><ul>${bw}</ul></div>` : ''}
+      ${notes ? `<div class="eksec"><h4>Other notes</h4><ul>${notes}</ul></div>` : ''}
+    </div>`;
   }
   function rowCard(p, i, open = false) {
     const d = p.drugs[i];
@@ -375,17 +577,91 @@
       ['Classification', d.classification || '—'], ['Indications', d.indication],
     ];
     if (d.activity) rows.push(['Activity against', d.activity]);
+    const ek = ekHtml(d);
     return `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
-      ${d.essential ? `<details${open ? ' open' : ''}><summary>Essential knowledge</summary><p class="ek">${esc(d.essential)}</p></details>` : ''}`;
+      ${ek ? `<details${open ? ' open' : ''}><summary>Essential knowledge</summary>${ek}</details>` : ''}`;
   }
   function sourceBlock(c) {
-    const rows = c.d.length <= 2 ? c.d.map(i => rowCard(c.page, i)).join('<hr>') : '';
-    return `<div class="drug">${rows}<div class="src">${dot(c.page)}${esc(pageName(c.page))} · ${esc(c.page.title)} · ${esc(c.f)} deck</div></div>`;
+    const ekCard = c.f === 'EssentialKnowledge' || c.k === 'ek-which';
+    const rows = c.d.length <= 2 ? c.d.map(i => rowCard(c.page, i, ekCard)).join('<hr>') : '';
+    let cmp = '';
+    if (c.d.length === 1) {
+      const d = c.page.drugs[c.d[0]];
+      const mates = classmates(d);
+      const confused = confusedRefs(c);
+      const refs = confused.length ? uniq([d.ref, ...confused]).slice(0, 4) : mates.length > 1 ? mates.slice(0, 5).map(x => x.ref) : [];
+      if (refs.length > 1) cmp = `<button class="linkbtn" data-compare="${refs.join(',')}">${confused.length ? 'Compare with drugs you mixed up' : `Compare the ${mates.length} drugs in this class`}</button>`;
+    } else if (c.d.length > 1 && c.d.length <= 5) {
+      cmp = `<button class="linkbtn" data-compare="${c.d.map(i => c.page.drugs[i].ref).join(',')}">Compare these drugs</button>`;
+    }
+    return `<div class="drug">${rows}${cmp}<div class="src">${dot(c.page)}${esc(pageName(c.page))} · ${esc(c.page.title)}</div></div>`;
   }
   const termLabel = c => `<span class="pchip" style="--pc:${c.page.color}">${esc(pageName(c.page))}</span> ${esc(KIND_LABEL[c.k] || c.f)}`;
 
+  // ====================================================================== "what you picked" on a wrong answer
+  const KIND_NOUN = {
+    brand: 'brand name', generic: 'generic name', category: 'drug class', classification: 'classification',
+    indication: 'indications', 'ek-kse': 'key side effects', 'ek-bw': 'US boxed warnings', 'ek-notes': 'other notes',
+    organism: 'organisms covered',
+  };
+  const PLURAL_NOUNS = new Set(['indications', 'key side effects', 'US boxed warnings', 'other notes', 'organisms covered']);
+  const subjectRef = c => (c.d.length === 1 ? c.page.drugs[c.d[0]].ref : null);
+  const drugsByLabel = (label, page) => {
+    const all = PAGES.flatMap(p => p.drugs).filter(d => d.label === baseLabel(label));
+    return all.filter(d => d.page === page).concat(all.filter(d => d.page !== page));
+  };
+  const who = ds => ds.slice(0, 3).map(d => `${dot(d.page)}<b>${esc(d.label)}</b> <span class="note">${esc(pageName(d.page))}</span>`).join(', ')
+    + (ds.length > 3 ? ` and ${ds.length - 3} more` : '');
+  function ownersOfAnswer(c, text) {   // drugs whose card of the same kind has exactly this answer
+    const hits = ALL.filter(x => x.k === c.k && x !== c && x.a === text);
+    const same = hits.filter(x => x.page === c.page);
+    return uniq((same.length ? same : hits).flatMap(x => x.d.map(i => x.page.drugs[i])));
+  }
+  function ownersOfItem(c, item) {     // drugs that list this item for the same kind of fact
+    const hits = ALL.filter(x => x.k === c.k && x !== c && (x.items || [x.a]).includes(item));
+    const same = hits.filter(x => x.page === c.page);
+    return uniq((same.length ? same : hits).flatMap(x => x.d.map(i => x.page.drugs[i])));
+  }
+  function fieldOf(d, k) {
+    if (k === 'sa-category') return `drug class: ${d.category || '—'}`;
+    if (k === 'sa-indication') return `indications: ${d.indication || '—'}`;
+    if (k === 'sa-classification') return `classification: ${d.classification || 'Rx only'}`;
+    if (k === 'sa-organism') return d.activity ? `activity against: ${d.activity}` : 'no organisms listed';
+    return '';
+  }
+  // Returns { html, refs } explaining where the wrong choice(s) come from.
+  function explainWrong(c, picks) {
+    const lines = [];
+    const refs = [];
+    const subj = subjectRef(c);
+    for (const p of picks) {
+      if (c.k.startsWith('sa-') || c.k === 'ek-which') {
+        const d = drugsByLabel(p, c.page)[0];
+        if (!d) continue;
+        refs.push(d.ref);
+        const extra = c.k === 'ek-which' ? 'does not have this one' : esc(fieldOf(d, c.k));
+        lines.push(`${who([d])} — ${extra}`);
+        continue;
+      }
+      const owners = c.items && !/^\(#1\)|; /.test(p) && c.items.length > 1 ? ownersOfItem(c, p) : ownersOfAnswer(c, p);
+      if (!owners.length) { lines.push(`“${esc(p)}” is not on the list for this question.`); continue; }
+      owners.slice(0, 3).forEach(d => refs.push(d.ref));
+      const noun = KIND_NOUN[c.k] || 'answer';
+      lines.push(picks.length > 1 || (c.items && c.items.length > 1 && !/; /.test(p))
+        ? `“${esc(p)}” belongs to ${who(owners)}`
+        : `${PLURAL_NOUNS.has(noun) ? 'Those are' : 'That is'} the ${noun} of ${who(owners)}.`);
+    }
+    if (!lines.length) return { html: '', refs: [] };
+    const cmpRefs = uniq([subj, ...refs].filter(Boolean)).slice(0, 5);
+    if (subj) refs.slice(0, 3).forEach(r => confuse(subj, r));
+    return {
+      refs: cmpRefs,
+      html: `<div class="whybox"><p class="whyhead">What you picked</p><ul>${lines.map(l => `<li>${l}</li>`).join('')}</ul>
+        ${cmpRefs.length > 1 ? `<button class="linkbtn" data-compare="${cmpRefs.join(',')}">Compare side by side</button>` : ''}</div>`,
+    };
+  }
+
   // ====================================================================== question widget
-  // Renders one question into `el`; calls done(ok, given) once answered.
   let active = null;   // the widget that owns keyboard input
   function mountQuestion(el, c, fmt, done, opts = {}) {
     const w = { el, c, fmt, answered: false };
@@ -393,11 +669,11 @@
       <p class="prompt">${esc(c.q)}</p>`;
     let body = '';
     if (fmt === 'mc') {
-      w.options = opts.options || shuffle([c.a, ...distractors(c)]);
+      w.options = shuffle([c.a, ...distractors(c)]);
       body = `<div class="options${w.options.some(o => o.length > 60) ? ' long' : ''}" role="group" aria-label="Answer choices">${w.options.map((o, k) =>
         `<button class="opt" data-opt="${k}"><span class="key">${k + 1}</span><span>${answerHtml(o)}</span></button>`).join('')}</div>`;
     } else if (fmt === 'multi') {
-      w.options = opts.options || multiOptions(c);
+      w.options = multiOptions(c);
       body = `<p class="note">Select all that apply (${c.items.length} correct).</p>
         <div class="checks" role="group" aria-label="Select all that apply">${w.options.map((o, k) =>
           `<label class="opt check-opt" data-copt="${k}"><input type="checkbox" value="${k}"><span class="key">${k + 1}</span><span>${esc(o)}</span></label>`).join('')}</div>
@@ -407,19 +683,20 @@
         placeholder="Type your answer" aria-label="Your answer"><button class="primary">Check</button></form>
         <button class="linkbtn" data-dontknow>I don't know</button>`;
     } else {
-      body = `<div class="actions"><button class="primary" data-reveal>Show answer</button></div>`;
+      body = `<p class="note">Say or think the answer, then check it.</p><div class="actions"><button class="primary" data-reveal>Show answer <span class="hide-sm"><kbd>Space</kbd></span></button></div>`;
     }
     el.innerHTML = `${head}${body}<div data-feedback aria-live="polite"></div>`;
 
-    const finish = (ok, given, extra = '') => {
+    const finish = (ok, given, extra = '', why = '') => {
       if (w.answered) return;
       w.answered = true;
       const fb = el.querySelector('[data-feedback]');
       const showAns = !(ok && fmt === 'mc');
       fb.innerHTML = `<div class="verdict ${ok ? 'good' : 'bad'}"><span data-vtext>${ok ? 'Correct' : 'Not quite'}</span>${extra}
-          ${showAns ? `<div class="ans">${answerHtml(c.a)}</div>` : ''}</div>
+          ${showAns ? `<div class="ans">${ok ? '' : '<span class="anslabel">Correct answer</span>'}${answerHtml(c.a, c)}</div>` : ''}</div>
+        ${why}
         ${sourceBlock(c)}
-        ${fmt === 'written' && !ok ? '<div class="actions"><button class="secondary" data-override>I was right</button></div>' : ''}
+        ${fmt === 'written' && !ok && given ? '<div class="actions"><button class="secondary" data-override>I was right</button></div>' : ''}
         <div data-after></div>`;
       const ov = fb.querySelector('[data-override]');
       if (ov) ov.onclick = () => {
@@ -441,7 +718,8 @@
           if (o === c.a) b.classList.add('correct');
           else if (+b.dataset.opt === k) b.classList.add('wrong');
         });
-        finish(w.options[k] === c.a, w.options[k]);
+        const ok = w.options[k] === c.a;
+        finish(ok, w.options[k], '', ok ? '' : explainWrong(c, [w.options[k]]).html);
       };
       el.querySelectorAll('[data-opt]').forEach(b => b.onclick = () => w.choose(+b.dataset.opt));
     } else if (fmt === 'multi') {
@@ -453,7 +731,7 @@
         if (w.answered) return;
         const correct = new Set(c.items);
         const chosen = [...el.querySelectorAll('[data-copt] input')].filter(i => i.checked).map(i => w.options[+i.value]);
-        if (!chosen.length) return;
+        if (!chosen.length) { el.querySelector('.note').textContent = `Select at least one (${c.items.length} correct).`; return; }
         let right = 0, extra = 0;
         el.querySelectorAll('[data-copt]').forEach(l => {
           const o = w.options[+l.dataset.copt];
@@ -465,31 +743,38 @@
         });
         el.querySelector('[data-submit]').remove();
         const ok = right === correct.size && extra === 0;
-        finish(ok, chosen.join('; '), ok ? '' : ` <span class="score-inline">${right} of ${correct.size} found${extra ? `, ${extra} extra` : ''}</span>`);
+        const extras = chosen.filter(o => !correct.has(o));
+        finish(ok, chosen.join('; '), ok ? '' : ` <span class="score-inline">${right} of ${correct.size} found${extra ? `, ${extra} extra` : ''}</span>`,
+          extras.length ? explainWrong(c, extras).html : '');
       };
       el.querySelector('[data-submit]').onclick = w.submit;
     } else if (fmt === 'written') {
       const input = el.querySelector('[data-input]');
       if (opts.focus !== false) input.focus({ preventScroll: true });
+      const lock = () => {
+        input.disabled = true;
+        el.querySelector('[data-form] button').disabled = true;
+        el.querySelector('[data-dontknow]')?.remove();
+      };
       el.querySelector('[data-form]').onsubmit = e => {
         e.preventDefault();
         if (!input.value.trim() || w.answered) return;
-        input.disabled = true;
-        el.querySelector('[data-form] button').disabled = true;
-        el.querySelector('[data-dontknow]').remove();
-        finish(checkWritten(c, input.value), input.value);
+        lock();
+        const ok = checkWritten(c, input.value);
+        let why = '';
+        if (!ok) {
+          const hit = ALL.find(x => x.k === c.k && x !== c && x.page === c.page && checkWritten(x, input.value));
+          if (hit) why = explainWrong(c, [hit.a]).html;
+        }
+        finish(ok, input.value, '', why);
       };
-      el.querySelector('[data-dontknow]').onclick = () => {
-        input.disabled = true;
-        el.querySelector('[data-form] button').disabled = true;
-        el.querySelector('[data-dontknow]').remove();
-        finish(false, '');
-      };
+      el.querySelector('[data-dontknow]').onclick = () => { if (w.answered) return; lock(); finish(false, ''); };
     } else {
       w.reveal = () => {
         const r = el.querySelector('[data-reveal]');
         if (!r) return;
-        r.parentElement.innerHTML = `<div class="reveal"><div class="ans">${answerHtml(c.a)}</div>
+        el.querySelector('.note').remove();
+        r.parentElement.innerHTML = `<div class="reveal"><div class="ans">${answerHtml(c.a, c)}</div>
           <p class="note">Did you recall it?</p>
           <div class="actions"><button class="secondary" data-self="0">Missed it <span class="hide-sm"><kbd>1</kbd></span></button>
           <button class="primary" data-self="1">Knew it <span class="hide-sm"><kbd>2</kbd></span></button></div></div>`;
@@ -508,78 +793,114 @@
     document.querySelectorAll('.topbar nav [data-go]').forEach(b => b.classList.toggle('active', b.dataset.go === view));
   }
   let session = null;
-  function go(view) {
+  function endSession() {
+    if (session && session.io) session.io.disconnect();
+    if (session && session.timer) clearInterval(session.timer);
     session = null;
     active = null;
-    ({ setup: viewSetup, progress: viewProgress, browse: viewBrowse }[view] || viewSetup)();
+  }
+  function go(view, arg) {
+    endSession();
+    ({ setup: viewSetup, progress: viewProgress, browse: viewBrowse, compare: viewCompare }[view] || viewSetup)(arg);
     window.scrollTo(0, 0);
   }
   document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => go(b.dataset.go));
+  // any "Compare" link anywhere in the app
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('[data-compare]');
+    if (b) { e.preventDefault(); go('compare', b.dataset.compare.split(',')); }
+  });
 
-  // ====================================================================== upcoming quiz banner
+  // ====================================================================== upcoming quiz + today's plan
   function currentQuiz() {
     const t = today();
-    const i = QUIZZES.findIndex(q => q.until >= t);
+    const i = QUIZZES.findIndex(q => lastDay(q) >= t);
     return i < 0 ? null : { q: QUIZZES[i], next: QUIZZES[i + 1] };
   }
-  function quizCards(q) {
-    const pages = new Set(q.pages);
-    return ALL.filter(c => pages.has(c.page.page));
+  const quizCards = q => { const pages = new Set(q.pages); return ALL.filter(c => pages.has(c.page.page)); };
+  function todaysPlan() {
+    const due = learnOrder(ALL.filter(isDue));
+    const cur = currentQuiz();
+    const toQuiz = cur ? daysBetween(today(), myDate(cur.q)) : 99;
+    // Up to 20 new cards a day; in the last 2 days before the quiz, every unstudied quiz card.
+    const fresh = cur && toQuiz <= 14
+      ? shuffle(quizCards(cur.q).filter(c => stateOf(c) === 'new' && TOPIC_PRESETS[0].topics.includes(c.topic))).slice(0, toQuiz <= 2 ? Infinity : NEW_PER_DAY) : [];
+    return { due, fresh, cards: [...due.slice(0, 60), ...fresh] };
   }
   function bannerHtml() {
     const cur = currentQuiz();
-    if (!cur) return '';
+    const plan = todaysPlan();
+    const planHtml = `<div class="plan">
+      <div><p class="term-label">Today's plan</p>
+      <p class="plan-text">${plan.due.length ? `<b>${plan.due.length}</b> review${plan.due.length === 1 ? '' : 's'} due` : 'No reviews due'}${plan.fresh.length ? ` · <b>${plan.fresh.length}</b> new card${plan.fresh.length === 1 ? '' : 's'} for ${esc(cur.q.label)}` : ''}</p></div>
+      <button class="primary" data-plan ${plan.cards.length ? '' : 'disabled'}>${plan.cards.length ? 'Start' : 'All done'}</button></div>`;
+    if (!cur) return `<section class="banner">${planHtml}</section>`;
     const { q, next } = cur;
     const t = today();
-    const s = summarize(quizCards(q));
-    const days = daysBetween(t, q.start);
-    const when = t >= q.start ? (q.start === q.until ? 'Today' : `This week · ${fmtDay(q.start)}–${fmtDay(q.until)}`)
-      : days === 1 ? `Tomorrow · ${fmtDay(q.start)}` : `In ${days} days · ${fmtDay(q.start)}${q.until !== q.start ? `–${fmtDay(q.until)}` : ''}`;
+    const date = myDate(q);
+    const quizDay = t >= date ? t : date;
+    const s = summarize(quizCards(q), quizDay);
+    const days = daysBetween(t, date);
+    const range = `${fmtDay(q.start)}–${fmtDay(q.until)}`;
+    const mine = isLabWeek(q) && settings.labDay ? ' (your lab day)' : '';
+    const when = isLabWeek(q) && !settings.labDay
+      ? (t >= q.start ? `This week · ${range}` : `In ${days} days · ${range}`)
+      : days <= 0 ? `Today${mine}` : days === 1 ? `Tomorrow · ${fmtDay(date)}${mine}` : `In ${days} days · ${fmtDay(date)}${mine}`;
+    const labPick = isLabWeek(q) ? `<div class="labpick"><span class="note">${settings.labDay ? 'Your lab day:' : 'Pick your lab day to count down to your quiz:'}</span>
+      ${Object.keys(WEEKDAY).map(k => `<button class="chip" data-labday="${k}" aria-pressed="${settings.labDay === k}">${k[0].toUpperCase() + k.slice(1)}</button>`).join('')}</div>` : '';
     const pages = q.pages.length > 6 ? `All ${q.pages.length} pages` : q.pages.map(n => `<span class="nowrap">${dot(byPage[n])}${esc(pageName(byPage[n]))}</span>`).join(' ');
-    const mPct = pct(s.mastered, s.total);
     return `<section class="banner" aria-label="Upcoming quiz">
       <div class="banner-top">
         <div>
           <p class="term-label">Next BDK quiz · ${esc(q.label)}</p>
           <h2 class="banner-title">${esc(when)}</h2>
+          ${labPick}
           <p class="banner-pages">${pages}</p>
           <p class="note">Calculations: ${esc(q.calcs)}</p>
         </div>
-        <div class="ring" style="--p:${mPct}" role="img" aria-label="${mPct}% of quiz cards mastered"><span>${mPct}%</span><small>mastered</small></div>
+        <div class="ring" style="--p:${s.predicted}" role="img" aria-label="Predicted recall on quiz day: ${s.predicted}%"><span>${s.predicted}%</span><small>recall on<br>quiz day</small></div>
       </div>
       ${stackBar(s)}
-      <p class="note">${s.mastered} mastered · ${s.learning} learning · ${s.new} not studied · ${s.due} due for review, of ${s.total} cards</p>
+      <p class="note">${s.mastered} mastered · ${s.familiar} familiar · ${s.learning} learning · ${s.new} not studied, of ${s.total} cards</p>
       <div class="actions">
         <button class="primary" data-bq="learn">Learn these pages</button>
         <button class="secondary" data-bq="mc">Practice test (25)</button>
-        <button class="secondary" data-bq="flash">Flashcards</button>
+        <button class="secondary" data-bq="match">Match</button>
       </div>
+      ${planHtml}
       ${next ? `<p class="note banner-next">After that: ${esc(next.label)} · ${fmtDay(next.start)} · ${next.pages.length > 6 ? 'cumulative' : next.pages.map(n => esc(pageName(byPage[n]))).join(', ')}</p>` : ''}
     </section>`;
   }
   function wireBanner(root) {
     const cur = currentQuiz();
     root.querySelectorAll('[data-bq]').forEach(b => b.onclick = () => {
-      const cards = quizCards(cur.q);
-      const mode = b.dataset.bq;
+      const cards = quizCards(cur.q).filter(c => settings.topics.includes(c.topic));
       settings.pages = cur.q.pages.slice();
       saveSettings();
+      const mode = b.dataset.bq;
       if (mode === 'learn') startLearn(learnOrder(cards).slice(0, 25));
-      else startSession(shuffle(cards).slice(0, mode === 'mc' ? 25 : 30), mode);
+      else if (mode === 'match') startMatch();
+      else startSession(interleave(cards).slice(0, 25), mode);
     });
+    root.querySelectorAll('[data-labday]').forEach(b => b.onclick = () => {
+      settings.labDay = settings.labDay === b.dataset.labday ? null : b.dataset.labday;
+      saveSettings();
+      go('setup');
+    });
+    const plan = root.querySelector('[data-plan]');
+    if (plan) plan.onclick = () => startLearn(todaysPlan().cards, 'Today\'s plan');
   }
 
-  // mastery bar: mastered / learning / not studied (one hue, light -> dark)
+  // mastery bar: one hue, light -> dark = not studied -> mastered
+  const STATES = [['mastered', 'Mastered'], ['familiar', 'Familiar'], ['learning', 'Learning'], ['new', 'Not studied']];
   function stackBar(s, label = '') {
-    const segs = [['mastered', s.mastered], ['learning', s.learning], ['new', s.new]].filter(([, n]) => n);
-    const names = { mastered: 'Mastered', learning: 'Learning', new: 'Not studied' };
-    return `<div class="stack" role="img" aria-label="${label}${s.mastered} mastered, ${s.learning} learning, ${s.new} not studied">${segs.map(([k, n]) =>
-      `<span class="seg seg-${k}" style="flex:${n}" data-tip="${names[k]}: ${n} of ${s.total} (${pct(n, s.total)}%)"></span>`).join('')}</div>`;
+    return `<div class="stack" role="img" aria-label="${label}${STATES.map(([k, n]) => `${s[k]} ${n.toLowerCase()}`).join(', ')}">${STATES.filter(([k]) => s[k]).map(([k, n]) =>
+      `<span class="seg seg-${k}" style="flex:${s[k]}" data-tip="${n}: ${s[k]} of ${s.total} (${pct(s[k], s.total)}%)"></span>`).join('')}</div>`;
   }
-  const legend = () => `<div class="legend-row"><span><i class="sw seg-mastered"></i>Mastered (right twice in a row)</span>
-    <span><i class="sw seg-learning"></i>Learning</span><span><i class="sw seg-new"></i>Not studied</span></div>`;
+  const legend = () => `<div class="legend-row"><span><i class="sw seg-mastered"></i>Mastered (recall holds 7+ days)</span>
+    <span><i class="sw seg-familiar"></i>Familiar (2+ days)</span><span><i class="sw seg-learning"></i>Learning</span><span><i class="sw seg-new"></i>Not studied</span></div>`;
 
-  // ====================================================================== setup view
+  // ====================================================================== Study view
   function viewSetup() {
     setNav('setup');
     const selected = new Set(settings.pages);
@@ -595,64 +916,87 @@
       ${bannerHtml()}
       <h1 class="h-study">Study</h1>
       <div class="card">
-        <h2>BDK quizzes</h2>
-        <div class="row">${QUIZZES.map((q, i) => `<button class="chip${cur && cur.q === q ? ' next' : ''}${q.until < today() ? ' past' : ''}" data-quiz="${i}">
+        <h2><span class="stepnum">1</span>Pages</h2>
+        <div class="row">${QUIZZES.map((q, i) => `<button class="chip${cur && cur.q === q ? ' next' : ''}${lastDay(q) < today() ? ' past' : ''}" data-quiz="${i}">
           ${esc(q.label)} <span class="count">${q.pages.length > 6 ? fmtDay(q.start) : 'p' + q.pages.join(',')}</span></button>`).join('')}</div>
-      </div>
-
-      <div class="card">
-        <div class="row spread"><h2>Pages</h2>
+        <div class="row spread" style="margin-top:10px"><span class="note">Or pick pages:</span>
           <div><button class="linkbtn" data-all>All</button><button class="linkbtn" data-none>None</button></div></div>
         ${groups.map(g => `<div class="group"><div class="group-label"><span class="pdot" style="--pc:${SYSTEM_COLOR[g.sys]}"></span>${esc(SYSTEM_NAME[g.sys])}</div><div class="row">${
           g.pages.map(p => { const s = summarize(p.cards); return `<button class="chip pagechip" style="--pc:${p.color}" data-page="${p.page}" aria-pressed="${selected.has(p.page)}"
-            title="${esc(p.title)} · ${s.mastered} of ${s.total} mastered">${esc(pageName(p))}<span class="mini" style="--m:${pct(s.mastered, s.total)}%"></span></button>`; }).join('')}</div></div>`).join('')}
-        <p class="note" style="margin-top:10px">The line under each page shows how much of it you have mastered.</p>
+            title="${esc(p.title)} · ${s.mastered + s.familiar} of ${s.total} familiar or mastered">${esc(pageName(p))}<span class="mini" style="--m:${pct(s.mastered + s.familiar, s.total)}%"></span></button>`; }).join('')}</div></div>`).join('')}
+        <p class="note" style="margin-top:10px">The line under each page grows as its cards become familiar or mastered.</p>
+      </div>
+
+      <div class="card" data-topics-card>
+        <h2><span class="stepnum">2</span>What to practice</h2>
+        <div class="row">${TOPIC_PRESETS.map((p, i) => `<button class="linkbtn preset" data-preset="${i}">${esc(p.label)}</button>`).join('')}</div>
+        <div class="row" style="margin-top:6px">${TOPICS.map(t => `<button class="chip" data-topic="${t.id}" aria-pressed="${settings.topics.includes(t.id)}">${esc(t.label)}<span class="count" data-tcount="${t.id}"></span></button>`).join('')}</div>
+        <label class="check" style="margin-top:10px"><input type="checkbox" data-selectall ${settings.selectAll ? 'checked' : ''}>
+          Include “Select ALL drugs with…” questions</label>
+        <p class="note" data-topic-hint></p>
       </div>
 
       <div class="card">
-        <h2>Mode</h2>
+        <h2><span class="stepnum">3</span>How</h2>
         <div class="seg" data-seg="mode">${MODES.map(m => `<button data-val="${m.id}" aria-pressed="${settings.mode === m.id}">${m.label}</button>`).join('')}</div>
         <p class="note" data-modehint style="margin-top:8px"></p>
-        <h2 style="margin-top:16px">Which cards</h2>
-        <div class="seg" data-seg="filter">${FILTERS.map(f => `<button data-val="${f.id}" aria-pressed="${settings.filter === f.id}">${f.label}</button>`).join('')}</div>
-        <h2 style="margin-top:16px" data-countlabel>How many</h2>
-        <div class="seg" data-seg="count">${COUNTS.map(c => `<button data-val="${c}" aria-pressed="${settings.count === c}">${c || 'All'}</button>`).join('')}</div>
-      </div>
-
-      <details class="card" ${settings.decks.length < 4 || settings.kinds.length < 5 ? 'open' : ''}>
-        <summary><h2 style="display:inline">Decks and question types</h2></summary>
-        ${DECKS.map(d => `<label class="check"><input type="checkbox" data-deck="${d.id}" ${settings.decks.includes(d.id) ? 'checked' : ''}> ${esc(d.label)}</label>`).join('')}
-        <div class="indent" data-kinds>
-          <div class="group-label">Cards deck questions</div>
-          ${CARD_KINDS.map(k => `<label class="check"><input type="checkbox" data-kind="${k.id}" ${settings.kinds.includes(k.id) ? 'checked' : ''}> ${esc(k.label)}</label>`).join('')}
+        <div data-nonmatch>
+          <h2 style="margin-top:16px">Which cards</h2>
+          <div class="seg" data-seg="filter">${FILTERS.map(f => `<button data-val="${f.id}" aria-pressed="${settings.filter === f.id}">${f.label}<span class="count" data-fcount="${f.id}"></span></button>`).join('')}</div>
+          <h2 style="margin-top:16px" data-countlabel>How many</h2>
+          <div class="seg" data-seg="count">${COUNTS.map(c => `<button data-val="${c}" aria-pressed="${settings.count === c}">${c || 'All'}</button>`).join('')}</div>
+          <label class="check" data-autoscroll-row style="margin-top:10px"><input type="checkbox" data-autoscroll ${settings.autoscroll ? 'checked' : ''}> Jump to the next question after answering</label>
         </div>
-        <label class="check"><input type="checkbox" data-opt-checkboxes ${settings.checkboxes ? 'checked' : ''}> Answer list questions (ALL / Select ALL) with checkboxes</label>
-        <label class="check"><input type="checkbox" data-opt-autoscroll ${settings.autoscroll ? 'checked' : ''}> Scroll mode: jump to the next question after answering</label>
-      </details>
+        <div data-matchonly>
+          <h2 style="margin-top:16px">Pairs</h2>
+          <div class="seg" data-seg="matchType">${MATCH_TYPES.map(m => `<button data-val="${m.id}" aria-pressed="${settings.matchType === m.id}">${m.label}</button>`).join('')}</div>
+          <p class="note" data-best></p>
+        </div>
+      </div>
 
       <div class="startbar">
         <span class="note" data-avail></span>
         <button class="primary" data-start>Start</button>
-      </div>
-
-      <div class="card" style="margin-top:20px">
-        <h2>Quizlet import files</h2>
-        <p class="note">One set of files per page (Cards, Select ALL, Essential Knowledge, and Organisms for ID pages),
-          tab-separated, one card per line. Import in Quizlet with <b>Tab</b> between term and definition and <b>New line</b> between cards.</p>
-        <p><a class="secondary" href="downloads/BDK_2026-2027_Quizlet_Decks.zip" download>Download all decks (.zip)</a></p>
       </div>`;
 
     wireBanner($app);
     const refresh = () => {
+      const isMatch = settings.mode === 'match';
+      $app.querySelector('[data-topics-card]').hidden = isMatch;
+      $app.querySelector('[data-nonmatch]').hidden = isMatch;
+      $app.querySelector('[data-matchonly]').hidden = !isMatch;
+      $app.querySelector('[data-autoscroll-row]').hidden = settings.mode !== 'scroll';
+      $app.querySelector('[data-modehint]').textContent = MODES.find(m => m.id === settings.mode).hint;
+      $app.querySelector('[data-countlabel]').textContent = settings.mode === 'learn' ? 'Cards per Learn session' : 'Number of questions';
+      const pages = new Set(settings.pages);
+      const inPages = ALL.filter(c => pages.has(c.page.page));
+      for (const t of TOPICS) {
+        const n = inPages.filter(c => c.topic === t.id && (settings.selectAll || !c.k.startsWith('sa-'))).length;
+        const el = $app.querySelector(`[data-tcount="${t.id}"]`);
+        el.textContent = n;
+        el.closest('.chip').classList.toggle('empty', !n);
+      }
+      for (const f of FILTERS) $app.querySelector(`[data-fcount="${f.id}"]`).textContent = ` ${pool(f.id).length}`;
+      const preset = TOPIC_PRESETS.find(p => p.topics.length === settings.topics.length && p.topics.every(t => settings.topics.includes(t)));
+      $app.querySelector('[data-topic-hint]').textContent = preset && preset.hint ? preset.hint : '';
+      $app.querySelectorAll('[data-preset]').forEach(b => b.classList.toggle('on', TOPIC_PRESETS[+b.dataset.preset] === preset));
+      const start = $app.querySelector('[data-start]');
+      if (isMatch) {
+        const drugs = matchCandidates();
+        const best = PROGRESS.match[matchKey()];
+        $app.querySelector('[data-best]').textContent = best ? `Best time for these pages: ${best.toFixed(1)} s` : '';
+        $app.querySelector('[data-avail]').textContent = !settings.pages.length ? 'Pick at least one page'
+          : drugs.length >= 3 ? `${Math.min(6, drugs.length)} pairs per board, from ${drugs.length} drugs` : 'Not enough drugs with this pair type';
+        start.disabled = drugs.length < 3;
+        return;
+      }
       const n = pool().length;
       const shown = settings.count ? Math.min(n, settings.count) : n;
       const unit = settings.mode === 'learn' ? 'cards to learn' : 'questions';
       $app.querySelector('[data-avail]').textContent = !settings.pages.length ? 'Pick at least one page'
-        : n ? `${shown} ${unit} (of ${n} matching)` : 'No cards match these settings';
-      $app.querySelector('[data-start]').disabled = !n;
-      $app.querySelector('[data-kinds]').style.display = settings.decks.includes('Cards') ? '' : 'none';
-      $app.querySelector('[data-modehint]').textContent = MODES.find(m => m.id === settings.mode).hint;
-      $app.querySelector('[data-countlabel]').textContent = settings.mode === 'learn' ? 'Cards per Learn session' : 'Number of questions';
+        : !settings.topics.length ? 'Pick at least one topic'
+          : n ? `${shown} ${unit} (of ${n})` : settings.filter === 'due' ? 'Nothing due on these pages' : 'No cards match';
+      start.disabled = !n;
     };
     const setPages = ids => {
       settings.pages = ids;
@@ -667,16 +1011,19 @@
     $app.querySelector('[data-all]').onclick = () => setPages(PAGES.map(p => p.page));
     $app.querySelector('[data-none]').onclick = () => setPages([]);
     $app.querySelectorAll('[data-quiz]').forEach(b => b.onclick = () => setPages(QUIZZES[+b.dataset.quiz].pages.slice()));
-    $app.querySelectorAll('[data-deck]').forEach(c => c.onchange = () => {
-      settings.decks = DECKS.map(d => d.id).filter(id => $app.querySelector(`[data-deck="${id}"]`).checked);
-      saveSettings(); refresh();
+    const setTopics = ids => {
+      settings.topics = ids;
+      saveSettings();
+      $app.querySelectorAll('[data-topic]').forEach(b => b.setAttribute('aria-pressed', ids.includes(b.dataset.topic)));
+      refresh();
+    };
+    $app.querySelectorAll('[data-topic]').forEach(b => b.onclick = () => {
+      const id = b.dataset.topic;
+      setTopics(settings.topics.includes(id) ? settings.topics.filter(x => x !== id) : [...settings.topics, id]);
     });
-    $app.querySelectorAll('[data-kind]').forEach(c => c.onchange = () => {
-      settings.kinds = CARD_KINDS.map(k => k.id).filter(id => $app.querySelector(`[data-kind="${id}"]`).checked);
-      saveSettings(); refresh();
-    });
-    $app.querySelector('[data-opt-checkboxes]').onchange = e => { settings.checkboxes = e.target.checked; saveSettings(); };
-    $app.querySelector('[data-opt-autoscroll]').onchange = e => { settings.autoscroll = e.target.checked; saveSettings(); };
+    $app.querySelectorAll('[data-preset]').forEach(b => b.onclick = () => setTopics(TOPIC_PRESETS[+b.dataset.preset].topics.slice()));
+    $app.querySelector('[data-selectall]').onchange = e => { settings.selectAll = e.target.checked; saveSettings(); refresh(); };
+    $app.querySelector('[data-autoscroll]').onchange = e => { settings.autoscroll = e.target.checked; saveSettings(); };
     $app.querySelectorAll('[data-seg]').forEach(seg => seg.querySelectorAll('button').forEach(b => b.onclick = () => {
       const key = seg.dataset.seg;
       settings[key] = key === 'count' ? +b.dataset.val : b.dataset.val;
@@ -684,6 +1031,7 @@
       saveSettings(); refresh();
     }));
     $app.querySelector('[data-start]').onclick = () => {
+      if (settings.mode === 'match') return startMatch();
       const cards = pick(pool(), settings.count);
       settings.mode === 'learn' ? startLearn(cards) : startSession(cards, settings.mode);
     };
@@ -692,8 +1040,11 @@
 
   // ====================================================================== Test / Written / Flashcards
   function startSession(cards, mode) {
+    endSession();
+    if (!cards.length) return go('setup');
     if (mode === 'scroll') return startScroll(cards);
     if (mode === 'learn') return startLearn(cards);
+    if (mode === 'match') return startMatch();
     session = { kind: 'classic', mode, queue: cards.slice(), i: 0, results: [] };
     renderClassic();
   }
@@ -711,16 +1062,14 @@
       <div class="card" data-q></div>
       <div class="actions"><button class="secondary" data-quit>End</button></div>`;
     $app.querySelector('[data-quit]').onclick = viewResults;
-    const fmt = formatFor(c, session.mode);
-    active = mountQuestion($app.querySelector('[data-q]'), c, fmt, (ok, given) => {
-      const r = { c, ok, given };
-      session.results.push(r);
+    active = mountQuestion($app.querySelector('[data-q]'), c, formatFor(c, session.mode), (ok, given) => {
+      session.results.push({ c, ok, given });
       record(c, ok);
       const after = $app.querySelector('[data-after]');
       after.innerHTML = `<div class="actions"><button class="primary" data-next>Next <span class="hide-sm"><kbd>Enter</kbd></span></button></div>`;
       const next = after.querySelector('[data-next]');
       next.focus({ preventScroll: true });
-      next.onclick = () => { session.i++; renderClassic(); };
+      next.onclick = () => { session.i++; renderClassic(); window.scrollTo(0, 0); };
       active.next = () => next.click();
     }, { onOverride: () => { session.results[session.results.length - 1].ok = true; undoMiss(c); } });
   }
@@ -732,7 +1081,7 @@
         <div class="flash-inner">
           <div class="face"><p class="term-label" style="text-align:center">${termLabel(c)}</p>
             <div class="big">${esc(c.q)}</div><div class="hint">Tap to flip <span class="hide-sm">· <kbd>Space</kbd></span></div></div>
-          <div class="face back"><div class="big">${answerHtml(c.a)}</div>${sourceBlock(c)}</div>
+          <div class="face back"><div class="big">${answerHtml(c.a, c)}</div>${sourceBlock(c)}</div>
         </div>
       </div>
       <div class="actions">
@@ -747,7 +1096,7 @@
     };
     size();
     const flip = () => { card.classList.toggle('flipped'); size(); };
-    card.onclick = e => { if (!e.target.closest('summary')) flip(); };
+    card.onclick = e => { if (!e.target.closest('summary, button')) flip(); };
     const answer = known => {
       session.results.push({ c, ok: known });
       record(c, known);
@@ -766,9 +1115,9 @@
     setNav('');
     session = { kind: 'scroll', mode: 'scroll', queue: cards, results: [], rendered: 0 };
     $app.innerHTML = `<div class="scrollhead">
-        <div class="qmeta"><span data-sh-count>0 of ${cards.length} answered</span><span data-sh-right>0 correct</span></div>
+        <div class="qmeta"><span data-sh-count>0 of ${cards.length} answered</span><span data-sh-right>0 correct</span>
+          <button class="linkbtn" data-quit>Finish</button></div>
         <div class="progress"><div data-sh-bar style="width:0%"></div></div>
-        <div class="actions" style="margin-top:8px"><button class="secondary" data-quit>Finish</button></div>
       </div>
       <ol class="feed" data-feed></ol>
       <div data-sentinel></div>
@@ -793,16 +1142,16 @@
         li.dataset.idx = i;
         feed.appendChild(li);
         const c = cards[i];
-        const w = mountQuestion(li, c, formatFor(c, 'scroll'), (ok, given) => {
-          session.results.push({ c, ok, given });
+        const w = mountQuestion(li, c, formatFor(c, 'scroll'), ok => {
+          session.results.push({ c, ok, given: '' });
           record(c, ok);
           li.classList.add(ok ? 'done-good' : 'done-bad');
           update();
-          if (settings.autoscroll) {
-            const nextLi = feed.querySelector(`[data-idx="${i + 1}"]`);
-            if (nextLi) setTimeout(() => nextLi.scrollIntoView({ behavior: 'smooth', block: 'start' }), ok ? 450 : 1400);
-          }
+          const nextLi = feed.querySelector(`[data-idx="${i + 1}"]`);
+          if (nextLi && settings.autoscroll) setTimeout(() => nextLi.scrollIntoView({ behavior: 'smooth', block: 'start' }), ok ? 450 : 1400);
+          if (nextLi) active = nextLi.widget;
         }, { focus: false });
+        li.widget = w;
         li.addEventListener('focusin', () => { active = w; });
         li.addEventListener('pointerdown', () => { active = w; });
         if (i === 0) active = w;
@@ -818,52 +1167,54 @@
   }
 
   // ====================================================================== Learn mode
-  // Quizlet-style rounds of 7: a card is answered by multiple choice first, then by recall
-  // (typed, checkboxes, or self-check). Right twice = mastered for the session. Misses reset
-  // the card and it comes back later in the round. Every answer also updates the spaced
-  // review schedule used by "Due for review".
-  const ROUND = 7;
-  function startLearn(cards) {
-    if (!cards.length) return;
+  // Successive relearning: a new card must be answered right 3 times in the session
+  // (multiple choice, then recall twice, spaced apart by other cards); a card you already
+  // know needs one recall. A miss sends the card back to multiple choice later in the round.
+  function startLearn(cards, title = 'Learn') {
+    endSession();
+    if (!cards.length) return go('setup');
     session = {
-      kind: 'learn', cards, waiting: cards.slice(), work: [], stage: new Map(), missed: new Set(),
-      round: 1, inRound: 0, roundLog: [], last: null, results: [],
+      kind: 'learn', title, cards: uniq(cards), waiting: uniq(cards), work: [], step: new Map(), plan: new Map(),
+      missed: new Set(), round: 1, inRound: 0, roundLog: [], history: [], results: [], done: new Set(),
     };
     fillWork();
     renderLearn();
+  }
+  function planFor(c) {
+    const st = stateOf(c);
+    return st === 'familiar' || st === 'mastered' ? ['recall'] : ['mc', 'recall', 'recall'];
   }
   function fillWork() {
     const L = session;
     while (L.work.length < ROUND && L.waiting.length) {
       const c = L.waiting.shift();
       L.work.push(c);
-      L.stage.set(c, 0);
+      L.plan.set(c, planFor(c));
+      L.step.set(c, 0);
     }
   }
   function learnCounts() {
     const L = session;
-    let mastered = 0, familiar = 0;
-    for (const c of L.cards) {
-      const st = L.stage.get(c);
-      if (st === 2) mastered++;
-      else if (st === 1) familiar++;
-    }
-    return { mastered, familiar, remaining: L.cards.length - mastered - familiar };
+    let started = 0;
+    for (const c of L.work) if (L.step.get(c) > 0) started++;
+    return { done: L.done.size, started, remaining: L.cards.length - L.done.size - started };
   }
   function learnBar() {
     const n = learnCounts();
     const T = session.cards.length;
-    return `<div class="learnbar" role="img" aria-label="${n.mastered} mastered, ${n.familiar} familiar, ${n.remaining} remaining">
-      <div class="stack">${[['mastered', n.mastered], ['learning', n.familiar], ['new', n.remaining]].filter(([, v]) => v)
+    return `<div class="learnbar" role="img" aria-label="${n.done} done, ${n.started} in progress, ${n.remaining} to go">
+      <div class="stack">${[['mastered', n.done], ['familiar', n.started], ['new', n.remaining]].filter(([, v]) => v)
         .map(([k, v]) => `<span class="seg seg-${k}" style="flex:${v}" data-tip="${v} of ${T}"></span>`).join('')}</div>
-      <div class="qmeta"><span>${n.mastered} mastered</span><span>${n.familiar} familiar</span><span>${n.remaining} to go</span></div></div>`;
+      <div class="qmeta"><span>${n.done} done</span><span>${n.started} in progress</span><span>${n.remaining} to go</span></div></div>`;
   }
   function nextLearnCard() {
     const L = session;
-    let options = L.work.filter(c => c !== L.last);
+    const recent = L.history.slice(-2);
+    let options = L.work.filter(c => !recent.includes(c));
+    if (!options.length) options = L.work.filter(c => c !== recent[recent.length - 1]);
     if (!options.length) options = L.work;
-    const minStage = Math.min(...options.map(c => L.stage.get(c)));
-    const low = options.filter(c => L.stage.get(c) === minStage);
+    const minStep = Math.min(...options.map(c => L.step.get(c)));
+    const low = options.filter(c => L.step.get(c) === minStep);
     return low[Math.floor(Math.random() * low.length)];
   }
   function renderLearn() {
@@ -872,54 +1223,68 @@
     if (!L.work.length) return learnDone();
     if (L.inRound >= ROUND) return learnRoundSummary();
     const c = nextLearnCard();
-    L.last = c;
-    const stage = L.stage.get(c);
-    const fmt = formatFor(c, 'learn', stage);
-    $app.innerHTML = `<div class="learnhead"><span class="term-label">Learn · round ${L.round}</span>${learnBar()}</div>
+    L.history.push(c);
+    const plan = L.plan.get(c);
+    const step = L.step.get(c);
+    const kind = plan[step];
+    const fmt = kind === 'mc' ? 'mc' : recallFormat(c);
+    const tag = kind === 'mc' ? 'Multiple choice' : fmt === 'multi' ? 'Recall · select all' : fmt === 'written' ? 'Recall · type it' : 'Recall · check yourself';
+    $app.innerHTML = `<div class="learnhead"><span class="term-label">${esc(L.title)} · round ${L.round}</span>${learnBar()}</div>
       <div class="card" data-q></div>
       <div class="actions"><button class="secondary" data-quit>End session</button></div>`;
     $app.querySelector('[data-quit]').onclick = learnDone;
-    const tag = stage === 0 ? 'Multiple choice' : fmt === 'multi' ? 'Recall · select all' : fmt === 'written' ? 'Recall · type it' : 'Recall · check yourself';
+    const advance = ok => {
+      if (ok) {
+        L.step.set(c, step + 1);
+        if (step + 1 >= plan.length) { L.done.add(c); L.work = L.work.filter(x => x !== c); fillWork(); }
+      } else {
+        L.plan.set(c, ['mc', 'recall', 'recall']);
+        L.step.set(c, 0);
+        L.missed.add(c);
+      }
+    };
     active = mountQuestion($app.querySelector('[data-q]'), c, fmt, (ok, given) => {
       record(c, ok);
       L.results.push({ c, ok, given });
       L.roundLog.push({ c, ok });
       L.inRound++;
-      if (ok) {
-        L.stage.set(c, stage + 1);
-        if (stage + 1 >= 2) { L.work = L.work.filter(x => x !== c); fillWork(); }
-      } else {
-        L.stage.set(c, 0);
-        L.missed.add(c);
-      }
+      advance(ok);
+      const left = plan.length - step - 1;
+      const msg = ok ? (left <= 0 ? 'Done for this session.' : `Right. ${left} more recall${left === 1 ? '' : 's'} later in the session.`)
+        : 'This card comes back later, starting with multiple choice.';
       const after = $app.querySelector('[data-after]');
-      const msg = ok ? (stage + 1 >= 2 ? 'Mastered for this session.' : 'Next time you will answer it from memory.')
-        : 'This card comes back later in the round.';
-      after.innerHTML = `<p class="note">${msg}</p><div class="actions"><button class="primary" data-next>Continue <span class="hide-sm"><kbd>Enter</kbd></span></button></div>`;
+      after.innerHTML = `<p class="note" data-learnmsg>${msg}</p><div class="actions"><button class="primary" data-next>Continue <span class="hide-sm"><kbd>Enter</kbd></span></button></div>`;
       const next = after.querySelector('[data-next]');
       next.focus({ preventScroll: true });
-      next.onclick = renderLearn;
+      next.onclick = () => { renderLearn(); window.scrollTo(0, 0); };
       active.next = () => next.click();
     }, {
       tag,
       onOverride: () => {
         undoMiss(c);
         L.missed.delete(c);
-        L.stage.set(c, stage + 1);
-        if (stage + 1 >= 2) { L.work = L.work.filter(x => x !== c); fillWork(); }
+        L.results[L.results.length - 1].ok = true;
+        L.roundLog[L.roundLog.length - 1].ok = true;
+        L.plan.set(c, plan);
+        L.step.set(c, step);
+        if (!L.work.includes(c)) L.work.push(c);
+        advance(true);
+        const left = plan.length - step - 1;
+        const m = $app.querySelector('[data-learnmsg]');
+        if (m) m.textContent = left <= 0 ? 'Done for this session.' : `Counted. ${left} more recall${left === 1 ? '' : 's'} later in the session.`;
       },
     });
   }
   function learnRoundSummary() {
     const L = session;
-    const misses = L.roundLog.filter(r => !r.ok);
-    const right = L.roundLog.length - misses.length;
+    const misses = uniq(L.roundLog.filter(r => !r.ok).map(r => r.c));
+    const right = L.roundLog.filter(r => r.ok).length;
     $app.innerHTML = `<div class="card">
         <p class="term-label">Round ${L.round} complete</p>
         <p class="score">${right} / ${L.roundLog.length}</p>
         ${learnBar()}
-        ${misses.length ? `<h2 style="margin-top:16px">Review before the next round</h2><ul class="missed">${[...new Set(misses.map(m => m.c))].map(c => `
-          <li><div class="q">${esc(c.q)}</div><div class="right">${answerHtml(c.a)}</div></li>`).join('')}</ul>`
+        ${misses.length ? `<h2 style="margin-top:16px">Look these over before the next round</h2><ul class="missed">${misses.map(c => `
+          <li><div class="q">${esc(c.q)}</div><div class="right">${answerHtml(c.a, c)}</div></li>`).join('')}</ul>`
           : '<p class="note">No misses this round.</p>'}
         <div class="actions"><button class="primary" data-cont>Continue to round ${L.round + 1} <span class="hide-sm"><kbd>Enter</kbd></span></button>
           <button class="secondary" data-quit>End session</button></div></div>`;
@@ -928,19 +1293,19 @@
     cont.onclick = () => { L.round++; L.inRound = 0; L.roundLog = []; renderLearn(); };
     $app.querySelector('[data-quit]').onclick = learnDone;
     active = { next: () => cont.click() };
+    window.scrollTo(0, 0);
   }
   function learnDone() {
     const L = session;
-    const n = learnCounts();
     const firstTry = new Map();
     for (const r of L.results) if (!firstTry.has(r.c)) firstTry.set(r.c, r.ok);
     const firstRight = [...firstTry.values()].filter(Boolean).length;
     const hard = [...L.missed];
     active = null;
     $app.innerHTML = `<div class="card">
-        <p class="term-label">Learn session ${L.work.length ? 'ended' : 'complete'}</p>
-        <p class="score">${n.mastered} / ${L.cards.length}</p>
-        <p class="note">cards mastered this session · ${firstRight} of ${firstTry.size} right on the first try · ${L.results.length} answers</p>
+        <p class="term-label">${esc(L.title)} ${L.work.length ? 'paused' : 'complete'}</p>
+        <p class="score">${L.done.size} / ${L.cards.length}</p>
+        <p class="note">cards finished · ${firstRight} of ${firstTry.size} right on the first try · ${L.results.length} answers</p>
         ${learnBar()}
         <div class="actions">
           ${L.work.length ? '<button class="primary" data-resume>Keep going</button>' : ''}
@@ -948,16 +1313,17 @@
           <button class="secondary" data-progress>See progress</button>
           <button class="secondary" data-setup>Back to Study</button>
         </div>
-        <p class="note">Each card's next review is scheduled from these answers. Choose “Due for review” on the Study page to see them on the right day.</p>
+        <p class="note">Each card's next review is scheduled from today's answers. Come back when “Today's plan” lists reviews: recalling a card again on a later day is what makes it stick.</p>
       </div>
       ${hard.length ? `<div class="card"><h2>Missed at least once (${hard.length})</h2><ul class="missed">${hard.map(c => `
         <li><div class="q">${esc(c.q)}</div><div class="right">${answerHtml(c.a)}</div></li>`).join('')}</ul></div>` : ''}`;
     const resume = $app.querySelector('[data-resume]');
     if (resume) resume.onclick = () => { L.inRound = 0; L.roundLog = []; renderLearn(); };
     const hb = $app.querySelector('[data-hard]');
-    if (hb) hb.onclick = () => startLearn(shuffle(hard));
+    if (hb) hb.onclick = () => startLearn(shuffle(hard), 'Missed cards');
     $app.querySelector('[data-progress]').onclick = () => go('progress');
     $app.querySelector('[data-setup]').onclick = () => go('setup');
+    window.scrollTo(0, 0);
   }
 
   // ====================================================================== results (Test / Scroll / Written / Flashcards)
@@ -993,10 +1359,13 @@
       ${missed.length ? `<div class="card"><h2>Missed (${missed.length})</h2><ul class="missed">${missed.map(r => `
         <li><div class="q">${esc(r.c.q)}</div>
           ${r.given ? `<div class="you">You: ${esc(r.given)}</div>` : ''}
-          <div class="right">Answer: ${answerHtml(r.c.a)}</div></li>`).join('')}</ul></div>` : ''}`;
+          <div class="right">Answer: ${answerHtml(r.c.a, r.c)}</div></li>`).join('')}</ul></div>` : ''}`;
     const retry = $app.querySelector('[data-retry]');
-    if (retry) retry.onclick = () => startLearn(shuffle(missed.map(r => r.c)));
-    $app.querySelector('[data-again]').onclick = () => startSession(pick(pool(), settings.count), mode);
+    if (retry) retry.onclick = () => startLearn(shuffle(missed.map(r => r.c)), 'Missed cards');
+    $app.querySelector('[data-again]').onclick = () => {
+      const cards = pick(pool(), settings.count, mode);
+      cards.length ? startSession(cards, mode) : go('setup');
+    };
     $app.querySelector('[data-setup]').onclick = () => go('setup');
     window.scrollTo(0, 0);
   }
@@ -1007,69 +1376,247 @@
       <span class="bv">${p}% <small>of ${n}</small></span>${extra}</div>`;
   }
 
+  // ====================================================================== Match game
+  const matchKey = () => `${settings.matchType}|${settings.pages.slice().sort((a, b) => a - b).join(',')}`;
+  function matchPair(d) {
+    if (settings.matchType === 'names') return d.brandNames ? [d.short, d.brandNames] : null;
+    if (settings.matchType === 'class') return d.category && d.category !== 'See individual drug components' ? [d.label, d.category] : null;
+    return d.indication && !d.indication.startsWith('See individual') ? [d.label, d.indication] : null;
+  }
+  function matchCandidates() {
+    const pages = new Set(settings.pages);
+    return PAGES.filter(p => pages.has(p.page)).flatMap(p => p.drugs).filter(matchPair);
+  }
+  function startMatch() {
+    endSession();
+    const cands = shuffle(matchCandidates());
+    // 6 pairs, no two sharing a left or right text (so every pair is unambiguous)
+    const board = [];
+    const L = new Set(), R = new Set();
+    for (const d of cands) {
+      const [l, r] = matchPair(d);
+      if (L.has(norm(l)) || R.has(norm(r))) continue;
+      L.add(norm(l)); R.add(norm(r));
+      board.push(d);
+      if (board.length === 6) break;
+    }
+    if (board.length < 3) return go('setup');
+    const tiles = shuffle(board.flatMap((d, k) => { const [l, r] = matchPair(d); return [{ k, side: 'l', text: l, d }, { k, side: 'r', text: r, d }]; }));
+    session = { kind: 'match', tiles, left: board.length, penalty: 0, misses: [], start: performance.now(), sel: null };
+    setNav('');
+    $app.innerHTML = `<div class="matchhead">
+        <span class="term-label">Match · ${esc(MATCH_TYPES.find(m => m.id === settings.matchType).label)}</span>
+        <span class="timer" data-timer aria-live="off">0.0 s</span>
+        <button class="linkbtn" data-quit>End</button></div>
+      <p class="note">Tap a drug, then its partner. A wrong pair adds 1 second.</p>
+      <div class="tiles-grid${settings.matchType === 'ind' ? ' wide' : ''}">${tiles.map((t, i) =>
+        `<button class="tile-btn" data-tile="${i}" style="--pc:${t.d.page.color}">${esc(t.text)}</button>`).join('')}</div>`;
+    const timerEl = $app.querySelector('[data-timer]');
+    const elapsed = () => (performance.now() - session.start) / 1000 + session.penalty;
+    session.timer = setInterval(() => { timerEl.textContent = `${elapsed().toFixed(1)} s`; }, 100);
+    $app.querySelector('[data-quit]').onclick = () => go('setup');
+    $app.querySelectorAll('[data-tile]').forEach(b => b.onclick = () => {
+      const S = session;
+      const i = +b.dataset.tile;
+      const t = S.tiles[i];
+      if (t.gone) return;
+      if (S.sel === null) { S.sel = i; b.classList.add('sel'); return; }
+      if (S.sel === i) { S.sel = null; b.classList.remove('sel'); return; }
+      const a = S.tiles[S.sel];
+      const ba = $app.querySelector(`[data-tile="${S.sel}"]`);
+      S.sel = null;
+      ba.classList.remove('sel');
+      if (a.k === t.k && a.side !== t.side) {
+        a.gone = t.gone = true;
+        [ba, b].forEach(x => { x.classList.add('gone'); x.disabled = true; });
+        if (--S.left === 0) matchDone(elapsed());
+      } else {
+        S.penalty += 1;
+        if (a.side !== t.side) { S.misses.push([a.d, t.d]); confuse(a.d.ref, t.d.ref); }
+        [ba, b].forEach(x => { x.classList.add('bad'); setTimeout(() => x.classList.remove('bad'), 450); });
+      }
+    });
+  }
+  function matchDone(secs) {
+    const S = session;
+    clearInterval(S.timer);
+    const key = matchKey();
+    const best = PROGRESS.match[key];
+    const isBest = !best || secs < best;
+    if (isBest) { PROGRESS.match[key] = +secs.toFixed(1); saveProgress(); }
+    const mixed = uniq(S.misses.map(([a, b]) => [a.ref, b.ref].sort().join(','))).map(k => k.split(',').map(drugByRef));
+    $app.innerHTML = `<div class="card">
+      <p class="term-label">Match complete</p>
+      <p class="score">${secs.toFixed(1)} s</p>
+      <p class="note">${isBest ? (best ? `New best (previous ${best.toFixed(1)} s)` : 'First time on these pages') : `Best: ${best.toFixed(1)} s`} · ${S.penalty} wrong pair${S.penalty === 1 ? '' : 's'} (+${S.penalty} s)</p>
+      ${mixed.length ? `<h2 style="margin-top:14px">Mixed up</h2><ul class="missed">${mixed.map(([a, b]) => `<li>
+        <div class="q">${dot(a.page)}${esc(a.label)} ↔ ${dot(b.page)}${esc(b.label)}</div>
+        <button class="linkbtn" data-compare="${a.ref},${b.ref}">Compare side by side</button></li>`).join('')}</ul>` : ''}
+      <div class="actions"><button class="primary" data-again>Play again</button><button class="secondary" data-setup>Back to Study</button></div></div>`;
+    $app.querySelector('[data-again]').onclick = startMatch;
+    $app.querySelector('[data-setup]').onclick = () => go('setup');
+    session.timer = null;
+  }
+
+  // ====================================================================== Compare view
+  const COMPARE_ROWS = [
+    ['cat', 'Drug class'], ['brand', 'Brand'], ['cls', 'Rx / OTC / schedule'], ['ind', 'Indications'],
+    ['kse', 'Key side effects'], ['bw', 'US boxed warnings'], ['notes', 'Other notes'], ['org', 'Activity against'],
+  ];
+  function factList(d, key) {
+    if (key === 'brand') return d.brand && d.brand !== '---' ? [d.brand] : [];
+    if (key === 'cat') return d.facts.cat ? [d.facts.cat] : [];
+    if (key === 'cls') return d.facts.cls.length ? d.facts.cls : ['Rx only'];
+    return d.facts[key] || [];
+  }
+  let compareSel = [];
+  function viewCompare(refs) {
+    setNav('compare');
+    if (refs) compareSel = refs.filter(drugByRef).slice(0, 5);
+    const sel = compareSel.map(drugByRef);
+    const cur = currentQuiz();
+    const pickPage = byPage[store.get('comparePage', cur ? cur.q.pages[0] : 2)] || PAGES[0];
+    const classes = [];
+    for (const d of pickPage.drugs) {
+      if (!d.category || d.category === 'See individual drug components') continue;
+      let g = classes.find(x => x.name === d.category);
+      if (!g) classes.push(g = { name: d.category, drugs: [] });
+      g.drugs.push(d);
+    }
+    const confusions = Object.entries(PROGRESS.confusions).sort((a, b) => b[1] - a[1]).slice(0, 6)
+      .map(([k, n]) => ({ refs: k.split('|'), n })).filter(x => x.refs.every(drugByRef));
+
+    let table = '';
+    if (sel.length >= 2) {
+      const rows = COMPARE_ROWS.map(([key, label]) => {
+        const lists = sel.map(d => factList(d, key));
+        if (lists.every(l => !l.length)) return '';
+        const shared = new Set(lists[0].filter(x => lists.every(l => l.includes(x))));
+        const same = lists.every(l => l.length === lists[0].length && l.every(x => shared.has(x)));
+        return `<tr class="${same ? 'same' : ''}"><th scope="row">${label}${same ? '<span class="samebadge">same</span>' : ''}</th>${lists.map(l =>
+          `<td>${l.length ? `<ul>${l.map(x => `<li class="${shared.has(x) ? 'shared' : 'diff'}">${esc(x)}</li>`).join('')}</ul>` : '<span class="note">—</span>'}</td>`).join('')}</tr>`;
+      }).join('');
+      table = `<div class="card">
+        <div class="row spread"><h2>Side by side</h2>
+          <label class="check"><input type="checkbox" data-onlydiff ${store.get('onlyDiff', false) ? 'checked' : ''}> Only differences</label></div>
+        <p class="note"><span class="diffkey">Bold</span> = differs between these drugs · gray = the same for all of them.</p>
+        <div class="table-wrap cmp-wrap${store.get('onlyDiff', false) ? ' onlydiff' : ''}"><table class="cmp">
+          <thead><tr><th></th>${sel.map(d => `<th scope="col">${dot(d.page)}${esc(d.label)}<div class="note">${esc(pageName(d.page))}</div>
+            <button class="linkbtn" data-remove="${d.ref}" aria-label="Remove ${esc(d.label)}">Remove</button></th>`).join('')}</tr></thead>
+          <tbody>${rows}</tbody></table></div>
+        <div class="actions"><button class="primary" data-cmp-learn>Learn these ${sel.length} drugs together</button></div>
+      </div>`;
+    }
+
+    $app.innerHTML = `<h1>Compare</h1>
+      <p class="sub">Put look-alike drugs side by side to see exactly how they differ.</p>
+      ${table}
+      ${sel.length === 1 ? `<div class="card"><p>Selected: ${dot(sel[0].page)}<b>${esc(sel[0].label)}</b>. Add at least one more drug.</p></div>` : ''}
+      ${confusions.length ? `<div class="card"><h2>Drugs you have mixed up</h2><ul class="missed">${confusions.map(x => {
+        const [a, b] = x.refs.map(drugByRef);
+        return `<li><div class="q">${dot(a.page)}${esc(a.label)} ↔ ${dot(b.page)}${esc(b.label)} <small>· ${x.n}×</small></div>
+          <button class="linkbtn" data-compare="${a.ref},${b.ref}">Compare</button></li>`;
+      }).join('')}</ul></div>` : ''}
+      <div class="card">
+        <h2>Choose drugs</h2>
+        <div class="jump">${PAGES.map(p => `<button class="pchip pagepick${p === pickPage ? ' on' : ''}" style="--pc:${p.color}" data-pickpage="${p.page}">${p.page}</button>`).join('')}</div>
+        <p class="note" style="margin-top:10px">${dot(pickPage)}${esc(pageName(pickPage))} · ${esc(pickPage.title)}</p>
+        ${classes.filter(g => g.drugs.length > 1).length ? `<div class="group-label">Whole class</div><div class="row">${classes.filter(g => g.drugs.length > 1).map(g =>
+          `<button class="chip" data-compare="${g.drugs.slice(0, 5).map(d => d.ref).join(',')}">${esc(g.name)} <span class="count">${g.drugs.length}</span></button>`).join('')}</div>` : ''}
+        <div class="group-label">One at a time (up to 5)</div>
+        <div class="row">${pickPage.drugs.map(d => `<button class="chip" data-toggle="${d.ref}" aria-pressed="${compareSel.includes(d.ref)}">${esc(d.short)}</button>`).join('')}</div>
+        ${compareSel.length ? '<div class="actions"><button class="secondary" data-clear>Clear selection</button></div>' : ''}
+      </div>`;
+
+    const rerender = () => viewCompare();
+    $app.querySelectorAll('[data-pickpage]').forEach(b => b.onclick = () => { store.set('comparePage', +b.dataset.pickpage); rerender(); });
+    $app.querySelectorAll('[data-toggle]').forEach(b => b.onclick = () => {
+      const r = b.dataset.toggle;
+      compareSel = compareSel.includes(r) ? compareSel.filter(x => x !== r) : [...compareSel, r].slice(-5);
+      rerender();
+    });
+    $app.querySelectorAll('[data-remove]').forEach(b => b.onclick = () => { compareSel = compareSel.filter(x => x !== b.dataset.remove); rerender(); });
+    const clear = $app.querySelector('[data-clear]');
+    if (clear) clear.onclick = () => { compareSel = []; rerender(); };
+    const od = $app.querySelector('[data-onlydiff]');
+    if (od) od.onchange = e => { store.set('onlyDiff', e.target.checked); $app.querySelector('.cmp-wrap').classList.toggle('onlydiff', e.target.checked); };
+    const cl = $app.querySelector('[data-cmp-learn]');
+    if (cl) cl.onclick = () => startLearn(interleave(uniq(sel.flatMap(d => d.cards))), 'Compare set');
+  }
+
   // ====================================================================== Progress view
   function viewProgress() {
     setNav('progress');
     const t = today();
-    const all = summarize(ALL);
+    const all = summarize(ALL, t);
     const studied = all.total - all.new;
     const last7 = Array.from({ length: 7 }, (_, i) => PROGRESS.days[addDays(t, -i)] || { n: 0, c: 0 });
     const w7 = last7.reduce((a, d) => ({ n: a.n + d.n, c: a.c + d.c }), { n: 0, c: 0 });
     let streak = 0;
     for (let i = PROGRESS.days[t] ? 0 : 1; PROGRESS.days[addDays(t, -i)]; i++) streak++;
     const cur = currentQuiz();
-    const dueCards = ALL.filter(isDue);
+    const plan = todaysPlan();
+    const studiedCards = ALL.filter(c => cs(c));
+    const avgRecall = studiedCards.length ? Math.round(studiedCards.reduce((a, c) => a + recallOn(c, t), 0) / studiedCards.length * 100) : 0;
 
-    // accuracy by question type
+    // by question type: accuracy and current predicted recall
     const kinds = {};
     for (const c of ALL) {
       const s = cs(c);
       if (!s) continue;
-      const k = c.k;
-      kinds[k] = kinds[k] || { r: 0, n: 0, cards: [] };
-      kinds[k].r += s.r;
-      kinds[k].n += s.r + s.w;
-      kinds[k].cards.push(c);
+      const k = kinds[c.k] = kinds[c.k] || { r: 0, n: 0, cards: [], rsum: 0 };
+      k.r += s.r;
+      k.n += s.r + s.w;
+      k.cards.push(c);
+      k.rsum += recallOn(c, t);
     }
     const kindRows = Object.entries(kinds).filter(([, v]) => v.n).sort((a, b) => a[1].r / a[1].n - b[1].r / b[1].n);
     const weakKind = kindRows.find(([, v]) => v.n >= 8 && v.r / v.n < 0.8);
 
-    // trouble cards: missed at least twice, or missed most recently with a low hit rate
-    const trouble = ALL.map(c => ({ c, s: cs(c) })).filter(x => x.s && x.s.w >= 2 && x.s.w >= x.s.r - 1)
-      .sort((a, b) => (b.s.w - b.s.r) - (a.s.w - a.s.r) || b.s.w - a.s.w).slice(0, 12);
+    // trouble cards ("leeches"): missed LEECH+ times, or missed more often than answered right
+    const trouble = ALL.map(c => ({ c, s: cs(c) })).filter(x => x.s && x.s.w >= 2 && (x.s.w >= LEECH || x.s.w > x.s.r))
+      .sort((a, b) => b.s.w - a.s.w || (b.s.w - b.s.r) - (a.s.w - a.s.r)).slice(0, 12);
+    const confusions = Object.entries(PROGRESS.confusions).sort((a, b) => b[1] - a[1]).slice(0, 6)
+      .map(([k, n]) => ({ refs: k.split('|'), n })).filter(x => x.refs.every(drugByRef));
 
-    // activity, last 14 days
     const days = Array.from({ length: 14 }, (_, i) => addDays(t, i - 13));
     const maxN = Math.max(1, ...days.map(d => (PROGRESS.days[d] || { n: 0 }).n));
 
     const tips = [];
-    if (dueCards.length) tips.push({ text: `${dueCards.length} card${dueCards.length === 1 ? ' is' : 's are'} due for review today. Reviewing a card on its scheduled day, after a gap, builds longer-lasting recall than repeating it several times in one sitting.`, act: 'due', label: 'Review due cards' });
+    if (plan.cards.length) tips.push({ text: `Today's plan: ${plan.due.length} review${plan.due.length === 1 ? '' : 's'} due${plan.fresh.length ? ` and ${plan.fresh.length} new cards for ${cur.q.label}` : ''}. Recalling a card again on a later day, after some forgetting, builds longer-lasting memory than repeating it in one sitting.`, act: 'plan', label: 'Start today\'s plan' });
     if (cur) {
-      const qs = summarize(quizCards(cur.q));
-      if (qs.new) tips.push({ text: `${qs.new} of ${qs.total} cards for the ${cur.q.label} quiz (${fmtDay(cur.q.start)}) are not studied yet. Learn mode introduces them in rounds of 7.`, act: 'quiz', label: `Learn ${cur.q.label} cards` });
+      const qs = summarize(quizCards(cur.q), t >= myDate(cur.q) ? t : myDate(cur.q));
+      if (qs.new) tips.push({ text: `${qs.new} of ${qs.total} cards for the ${cur.q.label} quiz (${fmtDay(myDate(cur.q))}) are not studied yet. Predicted recall on quiz day for all ${qs.total}: ${qs.predicted}%.`, act: 'quiz', label: `Learn ${cur.q.label} cards` });
     }
-    if (weakKind) tips.push({ text: `Your lowest accuracy is on ${KIND_LABEL[weakKind[0]]} (${pct(weakKind[1].r, weakKind[1].n)}% of ${weakKind[1].n} answers). Studying one question type at a time lets you compare similar answers side by side.`, act: 'kind:' + weakKind[0], label: `Practice ${KIND_LABEL[weakKind[0]]}` });
-    if (trouble.length) tips.push({ text: `${trouble.length} card${trouble.length === 1 ? ' has' : 's have'} been missed more often than answered right. In Learn mode each one must be answered from memory (typed or checkboxes) before it counts as mastered.`, act: 'trouble', label: 'Learn trouble cards' });
-    if (!studied) tips.push({ text: 'No answers recorded on this device yet. Start with the next quiz above, in Learn mode.' });
+    if (confusions.length) tips.push({ text: `You have mixed up ${confusions.length} pair${confusions.length === 1 ? '' : 's'} of drugs. Comparing them side by side, then practicing their cards mixed together, trains you to tell them apart.`, act: 'confuse', label: 'Practice mixed-up drugs' });
+    if (weakKind) tips.push({ text: `Lowest accuracy: ${KIND_LABEL[weakKind[0]]} (${pct(weakKind[1].r, weakKind[1].n)}% of ${weakKind[1].n} answers).`, act: 'kind:' + weakKind[0], label: `Practice ${KIND_LABEL[weakKind[0]]}` });
+    if (trouble.length) tips.push({ text: `${trouble.length} trouble card${trouble.length === 1 ? '' : 's'}: missed again and again. Open the drug in Compare to see what sets it apart, then relearn it.`, act: 'trouble', label: 'Learn trouble cards' });
+    if (!studied) tips.push({ text: 'No answers recorded on this device yet. Start with today\'s plan on the Study page.' });
 
     $app.innerHTML = `
       <h1>Progress</h1>
       <p class="sub">Saved in this browser. Use Export / Import below to move it to another device.</p>
       <div class="tiles">
-        <div class="tile"><span class="tv">${pct(all.mastered, all.total)}%</span><span class="tl">mastered<br><small>${all.mastered} of ${all.total} cards</small></span></div>
-        <div class="tile"><span class="tv">${studied}</span><span class="tl">cards studied<br><small>${all.learning} still learning</small></span></div>
+        <div class="tile"><span class="tv">${cur ? summarize(quizCards(cur.q), t >= myDate(cur.q) ? t : myDate(cur.q)).predicted + '%' : '—'}</span><span class="tl">predicted recall on ${cur ? esc(cur.q.label) + ' quiz day' : 'quiz day'}<br><small>all cards on its pages</small></span></div>
+        <div class="tile"><span class="tv">${all.mastered + all.familiar}</span><span class="tl">familiar or mastered<br><small>of ${all.total} cards · ${studied} studied</small></span></div>
         <div class="tile"><span class="tv">${w7.n ? pct(w7.c, w7.n) + '%' : '—'}</span><span class="tl">accuracy, last 7 days<br><small>${w7.n} answers</small></span></div>
-        <div class="tile"><span class="tv">${dueCards.length}</span><span class="tl">due for review<br><small>${streak ? `${streak}-day study streak` : 'no streak yet'}</small></span></div>
+        <div class="tile"><span class="tv">${plan.due.length}</span><span class="tl">due today<br><small>${streak ? `${streak}-day streak` : 'no streak yet'} · avg recall now ${studied ? avgRecall + '%' : '—'}</small></span></div>
       </div>
 
-      ${tips.length ? `<div class="card"><h2>How to improve</h2><ul class="tips">${tips.map((tp, i) => `<li><p>${esc(tp.text)}</p>${tp.act ? `<button class="secondary" data-tip-act="${i}">${esc(tp.label)}</button>` : ''}</li>`).join('')}</ul></div>` : ''}
+      ${tips.length ? `<div class="card"><h2>What to do next</h2><ul class="tips">${tips.map((tp, i) => `<li><p>${esc(tp.text)}</p>${tp.act ? `<button class="secondary" data-tip-act="${i}">${esc(tp.label)}</button>` : ''}</li>`).join('')}</ul></div>` : ''}
 
-      ${cur ? `<div class="card"><h2>${esc(cur.q.label)} quiz readiness · ${fmtDay(cur.q.start)}</h2>${legend()}
-        ${cur.q.pages.map(n => pageRow(byPage[n])).join('')}</div>` : ''}
+      ${cur ? `<div class="card"><h2>${esc(cur.q.label)} quiz readiness · ${isLabWeek(cur.q) && !settings.labDay ? `${fmtDay(cur.q.start)}–${fmtDay(cur.q.until)}` : fmtDay(myDate(cur.q))}</h2>${legend()}
+        ${cur.q.pages.map(n => pageRow(byPage[n], t >= myDate(cur.q) ? t : myDate(cur.q))).join('')}</div>` : ''}
+
+      ${confusions.length ? `<div class="card"><h2>Mixed-up drugs</h2><p class="note">From wrong multiple-choice answers and wrong Match pairs.</p><ul class="missed">${confusions.map(x => {
+        const [a, b] = x.refs.map(drugByRef);
+        return `<li><div class="q">${dot(a.page)}${esc(a.label)} ↔ ${dot(b.page)}${esc(b.label)} <small>· ${x.n}×</small></div>
+          <button class="linkbtn" data-compare="${a.ref},${b.ref}">Compare</button> <button class="linkbtn" data-pair-learn="${a.ref},${b.ref}">Practice together</button></li>`;
+      }).join('')}</ul></div>` : ''}
 
       <div class="card">
-        <h2>Accuracy by question type</h2>
-        <p class="note">All recorded answers, weakest first.</p>
+        <h2>By question type</h2>
+        <p class="note">Accuracy on every recorded answer, weakest first.</p>
         ${kindRows.length ? `<div class="kindbars">${kindRows.map(([k, v]) => barRow(KIND_LABEL[k] || k, v.r, v.n,
           `<button class="linkbtn" data-kind-learn="${k}">Practice</button>`)).join('')}</div>` : '<p class="note">No answers yet.</p>'}
       </div>
@@ -1086,17 +1633,17 @@
         }).join('')}</div>
       </div>
 
-      ${trouble.length ? `<div class="card"><h2>Trouble cards</h2><p class="note">Missed at least twice.</p><ul class="missed">${trouble.map(({ c, s }) => `
+      ${trouble.length ? `<div class="card"><h2>Trouble cards</h2><p class="note">Missed again and again.</p><ul class="missed">${trouble.map(({ c, s }) => `
         <li><div class="q">${dot(c.page)}${esc(c.q)}</div><div class="right">${answerHtml(c.a)}</div>
-        <div class="note">${s.r} right · ${s.w} missed</div></li>`).join('')}</ul></div>` : ''}
+        <div class="note">${s.r} right · ${s.w} missed ${c.d.length <= 5 ? `· <button class="linkbtn" data-compare="${uniq([...c.d.map(i => c.page.drugs[i].ref), ...confusedRefs(c)]).slice(0, 5).join(',')}">Compare</button>` : ''}</div></li>`).join('')}</ul></div>` : ''}
 
-      <div class="card"><h2>All pages</h2>${legend()}${PAGES.map(pageRow).join('')}</div>
+      <div class="card"><h2>All pages</h2>${legend()}${PAGES.map(p => pageRow(p, t)).join('')}</div>
 
       <div class="card">
-        <h2>How reviews are scheduled</h2>
-        <p class="note">Each right answer moves a card's next review further out: 1, 2, 4, 7, then 14 days (at most one step per day).
-          A miss brings it back the same day. If a quiz covers the card's page, its review is moved up to the day before that quiz.
-          A card counts as mastered once it has been answered right twice in a row.</p>
+        <h2>How this site schedules reviews</h2>
+        <p class="note">Each card has a memory strength, estimated with the FSRS-4.5 model (default parameters): how many days until your chance of recalling it drops to 90%.
+          A right answer raises it (more after a longer gap); a miss lowers it and brings the card back today. Only your first answer to a card each day changes its strength.
+          Reviews are moved up to the day before the quiz that covers the card's page. Familiar = strength of 2+ days; mastered = 7+ days.</p>
         <div class="actions">
           <button class="secondary" data-export>Export progress</button>
           <label class="secondary filebtn">Import progress<input type="file" accept="application/json,.json" data-import hidden></label>
@@ -1105,23 +1652,28 @@
         <p class="note" data-io-msg></p>
       </div>`;
 
+    const learnPair = refs => startLearn(interleave(uniq(refs.map(drugByRef).flatMap(d => d.cards))), 'Mixed-up drugs');
     $app.querySelectorAll('[data-tip-act]').forEach(b => b.onclick = () => {
       const act = tips[+b.dataset.tipAct].act;
-      if (act === 'due') startLearn(learnOrder(dueCards).slice(0, 50));
-      else if (act === 'quiz') startLearn(learnOrder(quizCards(cur.q)).slice(0, 25));
-      else if (act === 'trouble') startLearn(trouble.map(x => x.c));
+      if (act === 'plan') startLearn(plan.cards, 'Today\'s plan');
+      else if (act === 'quiz') startLearn(learnOrder(quizCards(cur.q).filter(c => settings.topics.includes(c.topic))).slice(0, 25));
+      else if (act === 'trouble') startLearn(trouble.map(x => x.c), 'Trouble cards');
+      else if (act === 'confuse') learnPair(uniq(confusions.flatMap(x => x.refs)).slice(0, 6));
       else if (act.startsWith('kind:')) startLearn(learnOrder(kinds[act.slice(5)].cards).slice(0, 25));
     });
+    $app.querySelectorAll('[data-pair-learn]').forEach(b => b.onclick = () => learnPair(b.dataset.pairLearn.split(',')));
     $app.querySelectorAll('[data-kind-learn]').forEach(b => b.onclick = () =>
       startLearn(learnOrder(kinds[b.dataset.kindLearn].cards).slice(0, 25)));
     $app.querySelectorAll('[data-page-learn]').forEach(b => b.onclick = () =>
-      startLearn(learnOrder(byPage[b.dataset.pageLearn].cards).slice(0, 25)));
+      startLearn(learnOrder(byPage[b.dataset.pageLearn].cards.filter(c => settings.topics.includes(c.topic))).slice(0, 25)));
     $app.querySelector('[data-export]').onclick = () => {
       const blob = new Blob([JSON.stringify({ app: 'bdk-quiz', exported: new Date().toISOString(), progress: PROGRESS }, null, 1)], { type: 'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = `bdk-progress-${t}.json`;
+      document.body.appendChild(a);
       a.click();
+      a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     };
     $app.querySelector('[data-import]').onchange = async e => {
@@ -1129,12 +1681,16 @@
       try {
         const json = JSON.parse(await e.target.files[0].text());
         const p = json.progress || json;
-        if (!p.cards || !p.days) throw new Error('not a progress file');
-        // Keep whichever record has more answers for each card; add daily counts.
+        if (!p.cards || !p.days) throw new Error('this is not a BDK progress file');
+        // Keep whichever record has more answers for each card; keep the higher daily counts.
         for (const [k, v] of Object.entries(p.cards)) if (!PROGRESS.cards[k] || v.n > PROGRESS.cards[k].n) PROGRESS.cards[k] = v;
         for (const [d, v] of Object.entries(p.days)) if (!PROGRESS.days[d] || v.n > PROGRESS.days[d].n) PROGRESS.days[d] = v;
+        for (const [k, v] of Object.entries(p.confusions || {})) PROGRESS.confusions[k] = Math.max(PROGRESS.confusions[k] || 0, v);
+        for (const [k, v] of Object.entries(p.match || {})) if (!PROGRESS.match[k] || v < PROGRESS.match[k]) PROGRESS.match[k] = v;
+        if (p.v !== 4) { delete PROGRESS.v; Object.assign(PROGRESS, loadProgressFrom(PROGRESS)); }
         saveProgress();
         viewProgress();
+        $app.querySelector('[data-io-msg]').textContent = `Imported ${Object.keys(p.cards).length} cards.`;
       } catch (err) {
         msg.textContent = `Import failed: ${err.message}`;
       }
@@ -1143,16 +1699,22 @@
       if (!confirm('Delete all progress saved in this browser?')) return;
       PROGRESS.cards = {};
       PROGRESS.days = {};
+      PROGRESS.confusions = {};
+      PROGRESS.match = {};
       saveProgress();
       viewProgress();
     };
   }
-  function pageRow(p) {
-    const s = summarize(p.cards);
+  function loadProgressFrom(p) {   // upgrade an imported older file in place
+    store.set('progress', p);
+    return loadProgress();
+  }
+  function pageRow(p, onDate) {
+    const s = summarize(p.cards, onDate);
     return `<div class="pagerow">
       <span class="pl">${dot(p)}<span>${esc(pageName(p))}</span></span>
       ${stackBar(s, pageName(p) + ': ')}
-      <span class="bv">${pct(s.mastered, s.total)}% <small>${s.due ? `${s.due} due` : `of ${s.total}`}</small></span>
+      <span class="bv" data-tip="Predicted recall on ${fmtDay(onDate)}, all ${s.total} cards">${s.predicted}% <small>${s.due ? `${s.due} due` : 'recall'}</small></span>
       <button class="linkbtn" data-page-learn="${p.page}">Learn</button></div>`;
   }
 
@@ -1163,31 +1725,39 @@
       <p class="sub">${esc(DATA.edition)}, page by page. Search any column; tap a row for essential knowledge.</p>
       <div class="jump">${PAGES.map(p => `<a href="#pg${p.page}" class="pchip" style="--pc:${p.color}">${p.page}</a>`).join('')}</div>
       <input class="search" data-q type="search" placeholder="Search generic, brand, category, indication…" aria-label="Search">
-      <div data-body></div>`;
+      <div data-body></div>
+      <div class="card" style="margin-top:20px">
+        <h2>Quizlet import files</h2>
+        <p class="note">One set of files per page (Cards, Select ALL, Essential Knowledge, and Organisms for ID pages),
+          tab-separated, one card per line. Import in Quizlet with <b>Tab</b> between term and definition and <b>New line</b> between cards.</p>
+        <p><a class="secondary" href="downloads/BDK_2026-2027_Quizlet_Decks.zip" download>Download all decks (.zip)</a></p>
+      </div>`;
     const body = $app.querySelector('[data-body]');
     const render = term => {
       const tq = term.trim().toLowerCase();
       let html = '';
       for (const p of PAGES) {
-        const rows = p.drugs.map((d, i) => [d, i]).filter(([d]) => !tq || [d.generic, d.brand, d.category, d.classification,
+        const rows = p.drugs.filter(d => !tq || [d.generic, d.brand, d.category, d.classification,
           d.indication, d.activity, d.essential].some(v => (v || '').toLowerCase().includes(tq)));
         if (!rows.length) continue;
         html += `<section class="pagetable" id="pg${p.page}"><h2 class="pagehead" style="--pc:${p.color}">${esc(p.title)} <span class="ed">p${p.page}</span></h2>
           <div class="table-wrap"><table><thead><tr><th>Pharmacologic category</th><th>Generic</th><th>Brand</th><th>Class.</th><th>Common indications</th></tr></thead><tbody>
-          ${rows.map(([d, i]) => `<tr data-p="${p.page}" data-i="${i}"><td>${esc(d.category)}</td><td>${esc(d.generic)}</td>
+          ${rows.map(d => `<tr data-ref="${d.ref}" tabindex="0"><td>${esc(d.category)}</td><td>${esc(d.generic)}</td>
             <td>${esc(d.brand)}</td><td>${esc(d.classification || '')}</td><td>${esc(d.indication)}${d.activity ? `<div class="act">Activity against: ${esc(d.activity)}</div>` : ''}</td></tr>`).join('')}
           </tbody></table></div>${p.legend ? `<p class="legend">${esc(p.legend)}</p>` : ''}</section>`;
       }
       body.innerHTML = html || '<p class="note">No matches</p>';
     };
-    body.onclick = e => {
-      const tr = e.target.closest('tr[data-i]');
-      if (!tr) return;
+    const toggleRow = tr => {
       const nxt = tr.nextElementSibling;
       if (nxt && nxt.classList.contains('detail')) return nxt.remove();
-      const d = byPage[tr.dataset.p].drugs[+tr.dataset.i];
-      tr.insertAdjacentHTML('afterend', `<tr class="detail"><td colspan="5"><p class="ek">${esc(d.essential || '—')}</p></td></tr>`);
+      const d = drugByRef(tr.dataset.ref);
+      const mates = classmates(d);
+      tr.insertAdjacentHTML('afterend', `<tr class="detail"><td colspan="5"><div class="detailin">${ekHtml(d) || '<p class="note">No essential knowledge listed.</p>'}
+        ${mates.length > 1 ? `<button class="linkbtn" data-compare="${mates.slice(0, 5).map(x => x.ref).join(',')}">Compare the ${mates.length} drugs in this class</button>` : ''}</div></td></tr>`);
     };
+    body.onclick = e => { const tr = e.target.closest('tr[data-ref]'); if (tr && !e.target.closest('button')) toggleRow(tr); };
+    body.onkeydown = e => { const tr = e.target.closest('tr[data-ref]'); if (tr && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggleRow(tr); } };
     const input = $app.querySelector('[data-q]');
     input.oninput = () => render(input.value);
     render('');
@@ -1198,16 +1768,14 @@
   tip.className = 'tooltip';
   tip.hidden = true;
   document.body.appendChild(tip);
-  const showTip = (el, x, y) => {
+  document.addEventListener('pointermove', e => {
+    const el = e.target.closest && e.target.closest('[data-tip]');
+    if (!el) { tip.hidden = true; return; }
     tip.textContent = el.dataset.tip;
     tip.hidden = false;
     const r = tip.getBoundingClientRect();
-    tip.style.left = Math.min(window.innerWidth - r.width - 8, Math.max(8, x - r.width / 2)) + 'px';
-    tip.style.top = Math.max(8, y - r.height - 12) + 'px';
-  };
-  document.addEventListener('pointermove', e => {
-    const el = e.target.closest && e.target.closest('[data-tip]');
-    if (el) showTip(el, e.clientX, e.clientY); else tip.hidden = true;
+    tip.style.left = Math.min(window.innerWidth - r.width - 8, Math.max(8, e.clientX - r.width / 2)) + 'px';
+    tip.style.top = Math.max(8, e.clientY - r.height - 12) + 'px';
   });
   document.addEventListener('scroll', () => { tip.hidden = true; }, { passive: true });
 
@@ -1216,22 +1784,23 @@
     if (!active || e.metaKey || e.ctrlKey || e.altKey) return;
     const typing = e.target.tagName === 'INPUT' && e.target.type !== 'checkbox';
     if (active.flash) {
+      if (typing) return;
       if (e.key === ' ') { e.preventDefault(); active.flip(); }
       else if (e.key === '1') active.answer(false);
       else if (e.key === '2') active.answer(true);
       return;
     }
     if (active.answered || (!active.fmt && active.next)) {
-      if (e.key === 'Enter' && active.next) { e.preventDefault(); active.next(); }
+      if (e.key === 'Enter' && active.next && !e.target.closest('button, a, label')) { e.preventDefault(); active.next(); }
       return;
     }
     if (typing) return;
     if (active.fmt === 'mc' && /^[1-9]$/.test(e.key) && +e.key <= active.options.length) active.choose(+e.key - 1);
     else if (active.fmt === 'multi') {
       if (/^[1-9]$/.test(e.key)) active.toggle(+e.key - 1);
-      else if (e.key === 'Enter') { e.preventDefault(); active.submit(); }
+      else if (e.key === 'Enter' && !e.target.closest('button')) { e.preventDefault(); active.submit(); }
     } else if (active.fmt === 'self') {
-      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); active.reveal(); }
+      if (e.key === ' ' || (e.key === 'Enter' && !e.target.closest('button'))) { e.preventDefault(); active.reveal(); }
       else if (e.key === '1') active.el.querySelector('[data-self="0"]')?.click();
       else if (e.key === '2') active.el.querySelector('[data-self="1"]')?.click();
     }
@@ -1241,15 +1810,19 @@
   const boot = json => {
     loadData(json);
     settings.pages = settings.pages.filter(n => byPage[n]);
+    settings.topics = settings.topics.filter(id => TOPICS.some(t => t.id === id));
     if (!settings.pages.length) {
       const cur = currentQuiz();
       settings.pages = (cur ? cur.q.pages : PAGES.map(p => p.page)).slice();
     }
+    saveProgress();
     viewSetup();
   };
+  // Read-only hook for automated tests (only with ?debug in the URL).
+  if (/[?&]debug\b/.test(location.search)) window.__bdk = { card: id => byId[id], session: () => session, all: () => ALL };
   if (window.BDK_DATA) boot(window.BDK_DATA);
   else fetch('data/decks.json').then(r => r.json()).then(boot).catch(() => {
-    $app.innerHTML = '<div class="warnbox">The decks could not be loaded.</div>';
+    $app.innerHTML = '<div class="warnbox">The decks could not be loaded. Check your connection and reload.</div>';
   });
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();

@@ -4,19 +4,19 @@ A static practice site and Quizlet deck set for the 2026-2027 Basic Drug Knowled
 
 ## The site
 
-- **Study tab:** a banner for the next BDK quiz (APC III Fall 2026 schedule: date, pages, calculation topic, and how much of it you have mastered), then page selection, color-coded with the PDF's header colors.
-- **Modes:**
-  - **Learn:** rounds of 7. Each card is asked as multiple choice first, then from memory (typed, select-all checkboxes, or a self-check for long notes). Right twice = mastered for the session; a miss sends the card back into the round.
-  - **Test:** one question at a time; list answers (ALL / Select ALL) use checkboxes.
-  - **Scroll:** every question on one scrolling page.
-  - **Written** and **Flashcards.**
-- **Which cards:** all, due for review, missed last time, or not studied yet.
-- **Progress tab:** mastery, accuracy, due count, and streak; next-quiz readiness by page; accuracy by question type; cards answered per day; trouble cards; suggestions with one-tap practice; export/import of progress between devices.
-- **Review schedule:** each right answer moves a card's next review out 1, 2, 4, 7, then 14 days (one step per day at most); a miss brings it back the same day; reviews are moved up to the day before the quiz that covers the card's page.
-- **List tab:** each page's table under its PDF header color, with its footer legend, searchable.
-- **Themes:** Auto, Light, Dark, Blue (button in the top bar).
-- **Offline:** installable to a phone home screen; works without a connection after the first visit.
-- Progress is saved in the browser (localStorage); nothing is sent anywhere.
+- **Study tab**
+  - **Next-quiz banner** (APC III Fall 2026 schedule): your quiz date (pick your lab day for lab-week quizzes), the pages and calculation topic, predicted recall on quiz day, and **Today's plan** (reviews due plus new cards for the next quiz; every unstudied quiz card in the last 2 days).
+  - **1 Pages** (color-coded with the PDF's header colors) · **2 What to practice** (Brand ↔ generic, Drug class, Indications, Rx/OTC/schedule, Side effects & boxed warnings, Other notes, Organisms; presets: BDK quiz questions, Everything, Safety only) · **3 How**.
+- **Modes**
+  - **Learn:** rounds of 7. A new card is answered right three times (multiple choice, then recall twice, spaced apart); a card you already know needs one recall; a miss starts it over later in the round.
+  - **Test**, **Scroll** (all questions on one page), **Written**, **Flashcards**, and **Match** (6 pairs per board, a wrong pair adds 1 second, best times saved).
+  - List answers (ALL / Select ALL) use checkboxes. A wrong answer shows **what you picked**: the drug that answer belongs to, with a Compare link.
+  - "Which drug?" questions for side effects and boxed warnings that only 1–2 drugs on a page have.
+- **Compare tab:** up to 5 drugs side by side (whole class or one at a time); bold = differs, gray = shared; "only differences" toggle; learn them together. Mixed-up pairs from wrong answers and Match are listed here.
+- **Progress tab:** predicted recall on quiz day, due reviews, accuracy by question type, readiness by page, mixed-up drugs, trouble cards, daily activity, suggested next steps, export/import.
+- **Memory model:** FSRS-4.5 (default parameters). Each card's memory strength is the number of days until predicted recall falls to 90%; a right answer raises it (more after a longer gap), a miss lowers it and brings the card back today; only the first answer of the day counts; reviews are moved up to the day before the quiz covering the card's page. Familiar = 2+ days, mastered = 7+ days.
+- **List tab:** each page's table under its PDF header color with its footer legend; essential knowledge in sections (key side effects, boxed warnings, other notes; class-shared side effects grayed); Quizlet deck download.
+- **Themes:** Auto, Light, Dark, Blue. **Offline:** installable, works without a connection after the first visit. Progress stays in the browser.
 
 ## The decks
 
