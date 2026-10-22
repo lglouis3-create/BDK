@@ -961,12 +961,14 @@
         <button class="secondary" data-bq="last">Last look</button>
         <button class="secondary" data-bq="learn">Learn</button>
         <button class="secondary" data-bq="match">Match</button>
+        <button class="secondary" data-bq="pdf">PDF pages</button>
       </div>
       <p class="note">Quiz ${days <= 0 ? 'today' : 'tomorrow'}: Cram works through the cards you don't know yet; Last look is a one-page list of your weakest cards to read right before the quiz.${days === 1 ? ' If you study tonight, sleep soon after: sleep shortly after learning helps you keep it.' : ''}</p>`
       : `<div class="actions">
         <button class="primary" data-bq="learn">Learn these pages</button>
         <button class="secondary" data-bq="mc">Practice test (25)</button>
         <button class="secondary" data-bq="match">Match</button>
+        <button class="secondary" data-bq="pdf">PDF pages</button>
       </div>`}
       ${planHtml}
       ${next ? `<p class="note banner-next">After that: ${esc(next.label)} · ${fmtDay(next.start)} · ${next.pages.length > 6 ? 'cumulative' : next.pages.map(n => esc(pageName(byPage[n]))).join(', ')}</p>` : ''}
@@ -975,6 +977,7 @@
   function wireBanner(root) {
     const cur = currentQuiz();
     root.querySelectorAll('[data-bq]').forEach(b => b.onclick = () => {
+      if (b.dataset.bq === 'pdf') return go('browse', { quiz: QUIZZES.indexOf(cur.q), view: 'pdf' });
       const cards = quizCards(cur.q).filter(c => settings.topics.includes(c.topic));
       settings.pages = cur.q.pages.slice();
       saveSettings();
@@ -1984,12 +1987,25 @@
   }
 
   // ====================================================================== Drug list (page by page, PDF colors)
-  function viewBrowse() {
+  // Images of the PDF pages (pages/p<n>.webp), margins trimmed; width and height in pixels.
+  const PAGE_IMG = {"2":[1636,1201],"3":[1640,1201],"4":[1640,1201],"5":[1640,1201],"6":[1636,1188],"7":[1636,1201],"8":[1636,1201],"9":[1636,1201],"10":[1640,1201],"11":[1641,1201],"12":[1636,1201],"13":[1640,1201],"14":[1633,1202],"15":[1639,1201],"16":[1639,1176],"17":[1642,1176],"18":[1640,1176],"19":[1636,1176],"20":[1636,1201],"21":[1638,1201],"22":[1635,1201],"23":[1627,1201],"24":[1630,1201],"25":[1630,1201],"26":[1630,1201],"27":[1635,1201]};
+  // arg: { quiz: index into QUIZZES or -1 for all pages, view: 'table' | 'pdf' }
+  function viewBrowse(arg = {}) {
     setNav('browse');
+    if (arg.quiz !== undefined) store.set('listQuiz', arg.quiz);
+    if (arg.view) store.set('listView', arg.view);
+    const cur = currentQuiz();
+    let qi = store.get('listQuiz', cur ? QUIZZES.indexOf(cur.q) : -1);
+    if (!QUIZZES[qi]) qi = -1;
+    const view = store.get('listView', 'table');
+    const shown = qi < 0 ? PAGES : [...QUIZZES[qi].pages].sort((a, b) => a - b).map(n => byPage[n]).filter(Boolean);
+    const quizChip = (i, label, pages) => `<button class="chip" data-listquiz="${i}" aria-pressed="${qi === i}">${esc(label)}${pages ? ` <span class="count">p${pages}</span>` : ''}</button>`;
     $app.innerHTML = `<h1>Drug list</h1>
-      <p class="sub">${esc(DATA.edition)}, page by page. Search any column; tap a row for essential knowledge.</p>
-      <div class="jump">${PAGES.map(p => `<a href="#pg${p.page}" class="pchip" style="--pc:${p.color}">${p.page}</a>`).join('')}</div>
-      <input class="search" data-q type="search" placeholder="Search generic, brand, category, indication…" aria-label="Search">
+      <p class="sub">${esc(DATA.edition)}, page by page. Pick a quiz to see only its pages.</p>
+      <div class="row listquiz">${quizChip(-1, 'All pages')}${QUIZZES.map((q, i) => quizChip(i, q.label + (q === (cur && cur.q) ? ' · next' : ''), q.pages.length > 6 ? '' : [...q.pages].sort((a, b) => a - b).join(', '))).join('')}</div>
+      <div class="seg listview" data-listview><button data-val="table" aria-pressed="${view === 'table'}">Table</button><button data-val="pdf" aria-pressed="${view === 'pdf'}">PDF pages</button></div>
+      <div class="jump">${shown.map(p => `<a href="#pg${p.page}" class="pchip" style="--pc:${p.color}">${p.page}</a>`).join('')}</div>
+      ${view === 'table' ? '<input class="search" data-q type="search" placeholder="Search generic, brand, category, indication…" aria-label="Search"><p class="note">Tap a row for essential knowledge.</p>' : '<p class="note">The pages as they appear in the PDF. Pinch to zoom, or tap a page to open it full size.</p>'}
       <div data-body></div>
       <div class="card" style="margin-top:20px">
         <h2>Quizlet import files</h2>
@@ -1997,11 +2013,21 @@
           tab-separated, one card per line. Import in Quizlet with <b>Tab</b> between term and definition and <b>New line</b> between cards.</p>
         <p><a class="secondary" href="downloads/BDK_2026-2027_Quizlet_Decks.zip" download>Download all decks (.zip)</a></p>
       </div>`;
+    $app.querySelectorAll('[data-listquiz]').forEach(b => b.onclick = () => viewBrowse({ quiz: +b.dataset.listquiz }));
+    $app.querySelectorAll('[data-listview] button').forEach(b => b.onclick = () => viewBrowse({ view: b.dataset.val }));
+    if (view === 'pdf') {
+      $app.querySelector('[data-body]').innerHTML = shown.map(p => {
+        const [w, h] = PAGE_IMG[p.page] || [1636, 1200];
+        return `<section class="pagetable" id="pg${p.page}"><h2 class="pagehead" style="--pc:${p.color}">${esc(p.title)} <span class="ed">p${p.page}</span></h2>
+          <a class="pdfpage" href="pages/p${p.page}.webp" target="_blank" rel="noopener"><img src="pages/p${p.page}.webp" width="${w}" height="${h}" loading="lazy" alt="PDF page ${p.page}: ${esc(p.title)}"></a></section>`;
+      }).join('');
+      return;
+    }
     const body = $app.querySelector('[data-body]');
     const render = term => {
       const tq = term.trim().toLowerCase();
       let html = '';
-      for (const p of PAGES) {
+      for (const p of tq ? PAGES : shown) {   // a search looks at every page, not only the chosen quiz's
         const rows = p.drugs.filter(d => !tq || [d.generic, d.brand, d.category, d.classification,
           d.indication, d.activity, d.essential].some(v => (v || '').toLowerCase().includes(tq)));
         if (!rows.length) continue;
@@ -2011,7 +2037,7 @@
             <td>${esc(d.brand)}</td><td>${esc(d.classification || '')}</td><td>${gloss(d.indication)}${d.activity ? `<div class="act">Activity against: ${esc(d.activity)}</div>` : ''}</td></tr>`).join('')}
           </tbody></table></div>${p.legend ? `<p class="legend">${esc(p.legend)}</p>` : ''}</section>`;
       }
-      body.innerHTML = html || '<p class="note">No matches</p>';
+      body.innerHTML = (tq && qi >= 0 ? '<p class="note">Showing matches from all pages.</p>' : '') + (html || '<p class="note">No matches</p>');
     };
     const toggleRow = tr => {
       const nxt = tr.nextElementSibling;

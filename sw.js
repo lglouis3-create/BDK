@@ -1,5 +1,5 @@
 // Offline support. Network first (so updates show up right away), cache as the fallback.
-const CACHE = 'bdk-v9';
+const CACHE = 'bdk-v10';
 const SHELL = ['./', 'index.html', 'assets/style.css', 'assets/app.js', 'data/decks.json', 'data/glossary.json', 'manifest.webmanifest', 'assets/icon-192.png'];
 
 self.addEventListener('install', e => {

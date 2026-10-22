@@ -391,3 +391,10 @@ tr[data-i] { cursor: pointer; }
 .termpop-in p { margin: 6px 0 10px; }
 .termpop-in a { color: var(--accent); font-weight: 600; }
 .termpop .row.spread { align-items: center; }
+
+/* List tab: quiz filter, Table / PDF pages switch, page images */
+.listquiz { margin: 4px 0 10px; }
+.listquiz .chip .count { font-weight: 500; }
+.listview { margin: 0 0 12px; }
+.pdfpage { display: block; background: #fff; border: 1px solid var(--border); border-top: 0; border-radius: 0 0 var(--radius) var(--radius); overflow: hidden; }
+.pdfpage img { display: block; width: 100%; height: auto; }
