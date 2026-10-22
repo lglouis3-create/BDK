@@ -10,6 +10,7 @@ A static practice site and Quizlet deck set for the 2026-2027 Basic Drug Knowled
 - **Modes**
   - **Learn:** rounds of 7. A new card is answered right three times (multiple choice, then recall twice, spaced apart); a card you already know needs one recall; a miss starts it over later in the round.
   - **Test**, **Scroll** (all questions on one page), **Written**, **Flashcards**, and **Match** (6 pairs per board, a wrong pair adds 1 second, best times saved).
+  - **Cram** (quiz today or tomorrow): pick the time you have; skips cards whose predicted recall on quiz day is already 90%+, shows each unfamiliar card once ("first look"), then tests it at growing gaps (2 right to finish; a miss comes back 3 cards later). Ends with **Last look**: one page of the cards you missed plus the weakest remaining cards, to read right before the quiz.
   - List answers (ALL / Select ALL) use checkboxes. A wrong answer shows **what you picked**: the drug that answer belongs to, with a Compare link.
   - "Which drug?" questions for side effects and boxed warnings that only 1–2 drugs on a page have.
 - **Compare tab:** up to 5 drugs side by side (whole class or one at a time); bold = differs, gray = shared; "only differences" toggle; learn them together. Mixed-up pairs from wrong answers and Match are listed here.
