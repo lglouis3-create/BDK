@@ -349,3 +349,7 @@ tr[data-i] { cursor: pointer; }
 .detailin { position: sticky; left: 10px; width: min(100%, calc(100vw - 56px)); }
 @media (min-width: 812px) { .detailin { width: auto; position: static; } }
 .tile-btn { overflow-wrap: break-word; word-break: normal; hyphens: auto; }
+/* cram */
+.lookans { margin-top: 12px; }
+.lastlook { padding-top: 6px; border-top-left-radius: 0; border-top-right-radius: 0; }
+.pin { color: var(--bad); font-weight: 800; }

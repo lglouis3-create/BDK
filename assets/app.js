@@ -54,6 +54,7 @@
     { id: 'written', label: 'Written', hint: 'Type each answer; long answers use a self-check.' },
     { id: 'flash', label: 'Flashcards', hint: 'Flip cards and sort them into Know it / Still learning.' },
     { id: 'match', label: 'Match', hint: 'Tap matching pairs as fast as you can. A wrong pair adds 1 second.' },
+    { id: 'cram', label: 'Cram', hint: 'For a quiz today or tomorrow: skips cards you know well, shows each new card once, then tests it again at growing gaps. Ends with a last-look sheet of what you missed.' },
   ];
   const FILTERS = [
     { id: 'all', label: 'All' },
@@ -416,7 +417,7 @@
   const saved = store.get('settings', {});
   const settings = Object.assign({
     pages: [], topics: TOPIC_PRESETS[0].topics.slice(), selectAll: true, mode: 'learn', count: 25,
-    filter: 'all', autoscroll: true, matchType: 'names', labDay: null,
+    filter: 'all', autoscroll: true, matchType: 'names', labDay: null, cramMin: 30,
   }, saved);
   if (saved.kinds && !saved.topics) {   // settings from the deck/question-type version
     const kinds = new Set([...(saved.kinds || []), ...(saved.decks || []).flatMap(d => ({
@@ -862,11 +863,18 @@
       </div>
       ${stackBar(s)}
       <p class="note">${s.mastered} mastered · ${s.familiar} familiar · ${s.learning} learning · ${s.new} not studied, of ${s.total} cards</p>
-      <div class="actions">
+      ${days <= 1 ? `<div class="actions">
+        <button class="primary" data-bq="cram">Cram for this quiz</button>
+        <button class="secondary" data-bq="last">Last look</button>
+        <button class="secondary" data-bq="learn">Learn</button>
+        <button class="secondary" data-bq="match">Match</button>
+      </div>
+      <p class="note">Quiz ${days <= 0 ? 'today' : 'tomorrow'}: Cram works through the cards you don't know yet; Last look is a one-page list of your weakest cards to read right before the quiz.${days === 1 ? ' If you study tonight, sleep soon after: sleep shortly after learning helps you keep it.' : ''}</p>`
+      : `<div class="actions">
         <button class="primary" data-bq="learn">Learn these pages</button>
         <button class="secondary" data-bq="mc">Practice test (25)</button>
         <button class="secondary" data-bq="match">Match</button>
-      </div>
+      </div>`}
       ${planHtml}
       ${next ? `<p class="note banner-next">After that: ${esc(next.label)} · ${fmtDay(next.start)} · ${next.pages.length > 6 ? 'cumulative' : next.pages.map(n => esc(pageName(byPage[n]))).join(', ')}</p>` : ''}
     </section>`;
@@ -880,6 +888,8 @@
       const mode = b.dataset.bq;
       if (mode === 'learn') startLearn(learnOrder(cards).slice(0, 25));
       else if (mode === 'match') startMatch();
+      else if (mode === 'cram') startCram(cards, cur.q);
+      else if (mode === 'last') viewLastLook(cur.q);
       else startSession(interleave(cards).slice(0, 25), mode);
     });
     root.querySelectorAll('[data-labday]').forEach(b => b.onclick = () => {
@@ -947,6 +957,10 @@
           <div class="seg" data-seg="count">${COUNTS.map(c => `<button data-val="${c}" aria-pressed="${settings.count === c}">${c || 'All'}</button>`).join('')}</div>
           <label class="check" data-autoscroll-row style="margin-top:10px"><input type="checkbox" data-autoscroll ${settings.autoscroll ? 'checked' : ''}> Jump to the next question after answering</label>
         </div>
+        <div data-cramonly>
+          <h2 style="margin-top:16px">Time you have</h2>
+          <div class="seg" data-seg="cramMin">${[15, 30, 60, 90].map(m => `<button data-val="${m}" aria-pressed="${settings.cramMin === m}">${m} min</button>`).join('')}</div>
+        </div>
         <div data-matchonly>
           <h2 style="margin-top:16px">Pairs</h2>
           <div class="seg" data-seg="matchType">${MATCH_TYPES.map(m => `<button data-val="${m.id}" aria-pressed="${settings.matchType === m.id}">${m.label}</button>`).join('')}</div>
@@ -963,7 +977,9 @@
     const refresh = () => {
       const isMatch = settings.mode === 'match';
       $app.querySelector('[data-topics-card]').hidden = isMatch;
-      $app.querySelector('[data-nonmatch]').hidden = isMatch;
+      const isCram = settings.mode === 'cram';
+      $app.querySelector('[data-nonmatch]').hidden = isMatch || isCram;
+      $app.querySelector('[data-cramonly]').hidden = !isCram;
       $app.querySelector('[data-matchonly]').hidden = !isMatch;
       $app.querySelector('[data-autoscroll-row]').hidden = settings.mode !== 'scroll';
       $app.querySelector('[data-modehint]').textContent = MODES.find(m => m.id === settings.mode).hint;
@@ -981,6 +997,13 @@
       $app.querySelector('[data-topic-hint]').textContent = preset && preset.hint ? preset.hint : '';
       $app.querySelectorAll('[data-preset]').forEach(b => b.classList.toggle('on', TOPIC_PRESETS[+b.dataset.preset] === preset));
       const start = $app.querySelector('[data-start]');
+      if (isCram) {
+        const plan = cramPlan(pool('all'));
+        $app.querySelector('[data-avail]').textContent = !settings.pages.length ? 'Pick at least one page'
+          : plan.cards.length ? `${plan.cards.length} cards in ~${settings.cramMin} min${plan.skipped ? ` · skips ${plan.skipped} you know well` : ''}` : 'You know every card here well';
+        start.disabled = !plan.cards.length;
+        return;
+      }
       if (isMatch) {
         const drugs = matchCandidates();
         const best = PROGRESS.match[matchKey()];
@@ -1026,12 +1049,13 @@
     $app.querySelector('[data-autoscroll]').onchange = e => { settings.autoscroll = e.target.checked; saveSettings(); };
     $app.querySelectorAll('[data-seg]').forEach(seg => seg.querySelectorAll('button').forEach(b => b.onclick = () => {
       const key = seg.dataset.seg;
-      settings[key] = key === 'count' ? +b.dataset.val : b.dataset.val;
+      settings[key] = key === 'count' || key === 'cramMin' ? +b.dataset.val : b.dataset.val;
       seg.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b));
       saveSettings(); refresh();
     }));
     $app.querySelector('[data-start]').onclick = () => {
       if (settings.mode === 'match') return startMatch();
+      if (settings.mode === 'cram') { const cur = currentQuiz(); return startCram(pool('all'), cur && cur.q.pages.every(n => settings.pages.includes(n)) ? cur.q : null); }
       const cards = pick(pool(), settings.count);
       settings.mode === 'learn' ? startLearn(cards) : startSession(cards, settings.mode);
     };
@@ -1374,6 +1398,130 @@
     return `<div class="barrow"><span class="bl">${esc(label)}</span>
       <span class="bt"><span class="bf" style="width:${Math.max(p, 1)}%" data-tip="${esc(label)}: ${r} of ${n} correct (${p}%)"></span></span>
       <span class="bv">${p}% <small>of ${n}</small></span>${extra}</div>`;
+  }
+
+  // ====================================================================== Cram mode
+  // For a quiz within hours: restudy helps more than testing at very short delays, and spacing
+  // repetitions apart within the session (one big stack) beats short gaps. So: skip cards that
+  // are already strong, show each unfamiliar card once, then test it at growing gaps.
+  const CRAM_SECONDS_PER_CARD = 30;   // about three short exposures per card
+  function cramPlan(cards, quizDate) {
+    const t = today();
+    const date = quizDate || t;
+    const strong = c => recallOn(c, date) >= 0.9 && !missedLast(c);
+    const weak = cards.filter(c => !strong(c));
+    const rank = c => (missedLast(c) ? 0 : stateOf(c) === 'new' ? 1 : 2) + recallOn(c, date);
+    const ordered = shuffle(weak).sort((a, b) => rank(a) - rank(b));
+    const fit = Math.max(5, Math.floor((settings.cramMin * 60) / CRAM_SECONDS_PER_CARD));
+    return { cards: ordered.slice(0, fit), skipped: cards.length - weak.length, more: Math.max(0, ordered.length - fit) };
+  }
+  function startCram(cards, quiz) {
+    endSession();
+    const plan = cramPlan(cards, quiz ? myDate(quiz) : null);
+    if (!plan.cards.length) return go('setup');
+    const queue = plan.cards.map(c => ({ c, phase: stateOf(c) === 'new' || missedLast(c) ? 'look' : 'test', wins: 0, tests: 0 }));
+    session = { kind: 'cram', mode: 'cram', queue, total: queue.length, done: 0, missed: new Set(), results: [], quiz,
+      start: Date.now(), budget: settings.cramMin * 60 * 1000, skipped: plan.skipped, more: plan.more };
+    renderCram();
+  }
+  function cramInsert(item, lag) {
+    const Q = session.queue;
+    Q.splice(Math.min(lag, Q.length), 0, item);
+  }
+  function cramHead() {
+    const S = session;
+    const left = Math.max(0, Math.round((S.budget - (Date.now() - S.start)) / 60000));
+    return `<div class="qmeta"><span>${S.done} of ${S.total} done</span><span>${left} min left</span><button class="linkbtn" data-quit>Finish</button></div>
+      <div class="progress"><div style="width:${pct(S.done, S.total)}%"></div></div>`;
+  }
+  function renderCram() {
+    const S = session;
+    setNav('');
+    if (!S.queue.length || Date.now() - S.start > S.budget + 60000) return cramDone();
+    const item = S.queue.shift();
+    const c = item.c;
+    if (item.phase === 'look') {
+      $app.innerHTML = `${cramHead()}
+        <div class="card"><p class="term-label">${termLabel(c)} <span class="tag">First look</span></p>
+          <p class="prompt">${esc(c.q)}</p>
+          <div class="verdict good lookans"><div class="ans">${answerHtml(c.a, c)}</div></div>
+          ${sourceBlock(c)}
+          <div class="actions"><button class="primary" data-next>Got it — test me later <span class="hide-sm"><kbd>Enter</kbd></span></button></div></div>`;
+      $app.querySelector('[data-quit]').onclick = cramDone;
+      const next = $app.querySelector('[data-next]');
+      next.focus({ preventScroll: true });
+      next.onclick = () => { item.phase = 'test'; cramInsert(item, 3); renderCram(); window.scrollTo(0, 0); };
+      active = { next: () => next.click() };
+      return;
+    }
+    const fmt = item.tests === 0 && !(c.items && c.items.length > 1) ? 'mc' : recallFormat(c);
+    $app.innerHTML = `${cramHead()}<div class="card" data-q></div>`;
+    $app.querySelector('[data-quit]').onclick = cramDone;
+    active = mountQuestion($app.querySelector('[data-q]'), c, fmt, (ok, given) => {
+      record(c, ok);
+      S.results.push({ c, ok, given });
+      item.tests++;
+      if (ok) {
+        item.wins++;
+        if (item.wins >= 2) S.done++;
+        else cramInsert(item, 8);           // second check after a longer gap
+      } else {
+        S.missed.add(c);
+        item.wins = 0;
+        cramInsert(item, 3);                // back soon
+      }
+      const after = $app.querySelector('[data-after]');
+      after.innerHTML = `<p class="note">${ok ? (item.wins >= 2 ? 'Done.' : 'Right. One more check later.') : 'It comes back in a few cards.'}</p>
+        <div class="actions"><button class="primary" data-next>Continue <span class="hide-sm"><kbd>Enter</kbd></span></button></div>`;
+      const next = after.querySelector('[data-next]');
+      next.focus({ preventScroll: true });
+      next.onclick = () => { renderCram(); window.scrollTo(0, 0); };
+      active.next = () => next.click();
+    }, { tag: item.tests === 0 ? 'Quick check' : 'Recall', onOverride: () => { undoMiss(c); S.missed.delete(c); } });
+  }
+  function cramDone() {
+    const S = session;
+    active = null;
+    store.set('lastCram', [...S.missed].map(c => c.id));
+    const left = S.queue.filter(i => i.wins < 2).length;
+    $app.innerHTML = `<div class="card">
+      <p class="term-label">Cram ${left ? 'stopped' : 'complete'}</p>
+      <p class="score">${S.done} / ${S.total}</p>
+      <p class="note">cards done · ${S.missed.size} missed at least once${S.skipped ? ` · ${S.skipped} skipped because you know them well` : ''}${S.more ? ` · ${S.more} more weak cards did not fit the time` : ''}</p>
+      <div class="actions">
+        <button class="primary" data-last>Last look (${S.missed.size + left} cards)</button>
+        ${left ? '<button class="secondary" data-resume>Keep going</button>' : ''}
+        <button class="secondary" data-setup>Back to Study</button>
+      </div>
+      <p class="note">Right before the quiz, read the last-look sheet once: at very short delays, rereading helps as much as testing. ${S.quiz && daysBetween(today(), myDate(S.quiz)) === 1 ? 'Then sleep: sleep soon after studying helps you keep what you learned.' : ''}</p></div>`;
+    $app.querySelector('[data-last]').onclick = () => viewLastLook(S.quiz, uniq([...S.missed, ...S.queue.filter(i => i.wins < 2).map(i => i.c)]));
+    const r = $app.querySelector('[data-resume]');
+    if (r) r.onclick = () => { S.start = Date.now(); S.budget = 15 * 60 * 1000; renderCram(); };
+    $app.querySelector('[data-setup]').onclick = () => go('setup');
+    window.scrollTo(0, 0);
+  }
+  // One page to read right before the quiz: the cards you missed, then the weakest of the rest.
+  function viewLastLook(quiz, firstCards = []) {
+    endSession();
+    setNav('');
+    const pages = quiz ? quiz.pages : settings.pages;
+    const date = quiz ? myDate(quiz) : today();
+    const fromCram = (store.get('lastCram', []) || []).map(id => byId[id]).filter(Boolean);
+    const pinned = uniq([...firstCards, ...fromCram]).filter(c => pages.includes(c.page.page));
+    const kinds = topicKinds();
+    const rest = ALL.filter(c => pages.includes(c.page.page) && kinds.has(c.k) && !pinned.includes(c))
+      .sort((a, b) => recallOn(a, date) - recallOn(b, date)).slice(0, Math.max(0, 40 - pinned.length));
+    const list = [...pinned, ...rest];
+    const byPg = {};
+    list.forEach(c => { (byPg[c.page.page] = byPg[c.page.page] || []).push(c); });
+    $app.innerHTML = `<h1>Last look${quiz ? ` · ${esc(quiz.label)}` : ''}</h1>
+      <p class="sub">${pinned.length ? `${pinned.length} card${pinned.length === 1 ? '' : 's'} you missed while cramming (marked ●), then` : ''} the cards with the lowest predicted recall on ${fmtDay(date)}. Read each answer once.</p>
+      ${Object.keys(byPg).sort((a, b) => a - b).map(n => `<section class="pagetable"><h2 class="pagehead" style="--pc:${byPage[n].color}">${esc(byPage[n].title)} <span class="ed">p${n}</span></h2>
+        <div class="card lastlook"><ul class="missed">${byPg[n].map(c => `<li>${pinned.includes(c) ? '<span class="pin">●</span> ' : ''}<div class="q">${esc(c.q)}</div><div class="right">${answerHtml(c.a, c)}</div></li>`).join('')}</ul></div></section>`).join('')}
+      <div class="actions"><button class="primary" data-quiz-me>Quiz me on these ${list.length}</button><button class="secondary" data-setup>Back to Study</button></div>`;
+    $app.querySelector('[data-quiz-me]').onclick = () => startSession(interleave(list), 'mc');
+    $app.querySelector('[data-setup]').onclick = () => go('setup');
+    window.scrollTo(0, 0);
   }
 
   // ====================================================================== Match game
