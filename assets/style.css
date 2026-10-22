@@ -353,3 +353,5 @@ tr[data-i] { cursor: pointer; }
 .lookans { margin-top: 12px; }
 .lastlook { padding-top: 6px; border-top-left-radius: 0; border-top-right-radius: 0; }
 .pin { color: var(--bad); font-weight: 800; }
+.learnbar .progress { margin: 6px 0 6px; height: 8px; }
+.redo { color: var(--bad); }

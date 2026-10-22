@@ -1198,7 +1198,7 @@
     endSession();
     if (!cards.length) return go('setup');
     session = {
-      kind: 'learn', title, cards: uniq(cards), waiting: uniq(cards), work: [], step: new Map(), plan: new Map(),
+      kind: 'learn', title, cards: uniq(cards), waiting: uniq(cards), work: [], step: new Map(), plan: new Map(), need: new Map(), hw: new Map(),
       missed: new Set(), round: 1, inRound: 0, roundLog: [], history: [], results: [], done: new Set(),
     };
     fillWork();
@@ -1214,22 +1214,29 @@
       const c = L.waiting.shift();
       L.work.push(c);
       L.plan.set(c, planFor(c));
+      L.need.set(c, L.plan.get(c).length);
       L.step.set(c, 0);
     }
   }
+  // Progress credits every right answer toward each card's finish and never moves backward;
+  // a miss shows up in "to redo" instead of shrinking the bar.
   function learnCounts() {
     const L = session;
-    let started = 0;
-    for (const c of L.work) if (L.step.get(c) > 0) started++;
-    return { done: L.done.size, started, remaining: L.cards.length - L.done.size - started };
+    let started = 0, credit = 0;
+    for (const c of L.cards) {
+      if (L.done.has(c)) { credit += 1; continue; }
+      const hw = L.hw.get(c) || 0;
+      if (hw > 0) started++;
+      if (L.need.has(c)) credit += Math.min(hw, L.need.get(c) - 1) / L.need.get(c);
+    }
+    const redo = [...L.missed].filter(c => !L.done.has(c)).length;
+    return { done: L.done.size, started, remaining: L.cards.length - L.done.size - started, redo, pct: (credit / L.cards.length) * 100 };
   }
   function learnBar() {
     const n = learnCounts();
-    const T = session.cards.length;
-    return `<div class="learnbar" role="img" aria-label="${n.done} done, ${n.started} in progress, ${n.remaining} to go">
-      <div class="stack">${[['mastered', n.done], ['familiar', n.started], ['new', n.remaining]].filter(([, v]) => v)
-        .map(([k, v]) => `<span class="seg seg-${k}" style="flex:${v}" data-tip="${v} of ${T}"></span>`).join('')}</div>
-      <div class="qmeta"><span>${n.done} done</span><span>${n.started} in progress</span><span>${n.remaining} to go</span></div></div>`;
+    return `<div class="learnbar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(n.pct)}" aria-label="Session progress">
+      <div class="progress"><div style="width:${n.pct.toFixed(1)}%"></div></div>
+      <div class="qmeta"><span>${n.done} done</span><span>${n.started} in progress</span><span>${n.remaining} to go</span>${n.redo ? `<span class="redo">${n.redo} to redo</span>` : ''}</div></div>`;
   }
   function nextLearnCard() {
     const L = session;
@@ -1259,6 +1266,7 @@
     $app.querySelector('[data-quit]').onclick = learnDone;
     const advance = ok => {
       if (ok) {
+        L.hw.set(c, Math.max(L.hw.get(c) || 0, step + 1));
         L.step.set(c, step + 1);
         if (step + 1 >= plan.length) { L.done.add(c); L.work = L.work.filter(x => x !== c); fillWork(); }
       } else {
@@ -1419,8 +1427,11 @@
     endSession();
     const plan = cramPlan(cards, quiz ? myDate(quiz) : null);
     if (!plan.cards.length) return go('setup');
-    const queue = plan.cards.map(c => ({ c, phase: stateOf(c) === 'new' || missedLast(c) ? 'look' : 'test', wins: 0, tests: 0 }));
-    session = { kind: 'cram', mode: 'cram', queue, total: queue.length, done: 0, missed: new Set(), results: [], quiz,
+    const queue = plan.cards.map(c => {
+      const look = stateOf(c) === 'new' || missedLast(c);
+      return { c, phase: look ? 'look' : 'test', wins: 0, tests: 0, need: (look ? 1 : 0) + 2, hw: 0, looked: false };
+    });
+    session = { kind: 'cram', mode: 'cram', queue, items: queue.slice(), total: queue.length, done: 0, missed: new Set(), results: [], quiz,
       start: Date.now(), budget: settings.cramMin * 60 * 1000, skipped: plan.skipped, more: plan.more };
     renderCram();
   }
@@ -1431,8 +1442,10 @@
   function cramHead() {
     const S = session;
     const left = Math.max(0, Math.round((S.budget - (Date.now() - S.start)) / 60000));
-    return `<div class="qmeta"><span>${S.done} of ${S.total} done</span><span>${left} min left</span><button class="linkbtn" data-quit>Finish</button></div>
-      <div class="progress"><div style="width:${pct(S.done, S.total)}%"></div></div>`;
+    const credit = S.items.reduce((a, i) => a + Math.min(i.hw, i.need) / i.need, 0);
+    const redo = S.items.filter(i => S.missed.has(i.c) && i.wins < 2).length;
+    return `<div class="qmeta"><span>${S.done} of ${S.total} done${redo ? ` · <span class="redo">${redo} to redo</span>` : ''}</span><span>${left} min left</span><button class="linkbtn" data-quit>Finish</button></div>
+      <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round((credit / S.total) * 100)}" aria-label="Cram progress"><div style="width:${((credit / S.total) * 100).toFixed(1)}%"></div></div>`;
   }
   function renderCram() {
     const S = session;
@@ -1450,7 +1463,7 @@
       $app.querySelector('[data-quit]').onclick = cramDone;
       const next = $app.querySelector('[data-next]');
       next.focus({ preventScroll: true });
-      next.onclick = () => { item.phase = 'test'; cramInsert(item, 3); renderCram(); window.scrollTo(0, 0); };
+      next.onclick = () => { item.phase = 'test'; item.looked = true; item.hw = Math.max(item.hw, 1); cramInsert(item, 3); renderCram(); window.scrollTo(0, 0); };
       active = { next: () => next.click() };
       return;
     }
@@ -1463,7 +1476,8 @@
       item.tests++;
       if (ok) {
         item.wins++;
-        if (item.wins >= 2) S.done++;
+        item.hw = Math.max(item.hw, (item.looked ? 1 : 0) + item.wins);
+        if (item.wins >= 2) { S.done++; item.hw = item.need; }
         else cramInsert(item, 8);           // second check after a longer gap
       } else {
         S.missed.add(c);
