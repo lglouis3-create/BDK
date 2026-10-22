@@ -355,3 +355,8 @@ tr[data-i] { cursor: pointer; }
 .pin { color: var(--bad); font-weight: 800; }
 .learnbar .progress { margin: 6px 0 6px; height: 8px; }
 .redo { color: var(--bad); }
+
+/* Back to a paused session from Compare */
+.backbar { position: sticky; top: 64px; z-index: 5; margin: 0 0 12px; padding: 8px 0; background: var(--bg); }
+.backbar .primary { width: 100%; }
+.guessnote { margin: -4px 0 12px; }

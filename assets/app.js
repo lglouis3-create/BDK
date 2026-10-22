@@ -631,7 +631,7 @@
     return '';
   }
   // Returns { html, refs } explaining where the wrong choice(s) come from.
-  function explainWrong(c, picks) {
+  function explainWrong(c, picks, track = true) {
     const lines = [];
     const refs = [];
     const subj = subjectRef(c);
@@ -654,7 +654,7 @@
     }
     if (!lines.length) return { html: '', refs: [] };
     const cmpRefs = uniq([subj, ...refs].filter(Boolean)).slice(0, 5);
-    if (subj) refs.slice(0, 3).forEach(r => confuse(subj, r));
+    if (track && subj) refs.slice(0, 3).forEach(r => confuse(subj, r));
     return {
       refs: cmpRefs,
       html: `<div class="whybox"><p class="whyhead">What you picked</p><ul>${lines.map(l => `<li>${l}</li>`).join('')}</ul>
@@ -693,7 +693,8 @@
       w.answered = true;
       const fb = el.querySelector('[data-feedback]');
       const showAns = !(ok && fmt === 'mc');
-      fb.innerHTML = `<div class="verdict ${ok ? 'good' : 'bad'}"><span data-vtext>${ok ? 'Correct' : 'Not quite'}</span>${extra}
+      const vtext = opts.guess ? (ok ? 'Correct — good guess' : 'Not this time — here is the answer') : ok ? 'Correct' : 'Not quite';
+      fb.innerHTML = `<div class="verdict ${ok ? 'good' : 'bad'}"><span data-vtext>${vtext}</span>${extra}
           ${showAns ? `<div class="ans">${ok ? '' : '<span class="anslabel">Correct answer</span>'}${answerHtml(c.a, c)}</div>` : ''}</div>
         ${why}
         ${sourceBlock(c)}
@@ -720,7 +721,7 @@
           else if (+b.dataset.opt === k) b.classList.add('wrong');
         });
         const ok = w.options[k] === c.a;
-        finish(ok, w.options[k], '', ok ? '' : explainWrong(c, [w.options[k]]).html);
+        finish(ok, w.options[k], '', ok ? '' : explainWrong(c, [w.options[k]], !opts.guess).html);
       };
       el.querySelectorAll('[data-opt]').forEach(b => b.onclick = () => w.choose(+b.dataset.opt));
     } else if (fmt === 'multi') {
@@ -746,7 +747,7 @@
         const ok = right === correct.size && extra === 0;
         const extras = chosen.filter(o => !correct.has(o));
         finish(ok, chosen.join('; '), ok ? '' : ` <span class="score-inline">${right} of ${correct.size} found${extra ? `, ${extra} extra` : ''}</span>`,
-          extras.length ? explainWrong(c, extras).html : '');
+          extras.length ? explainWrong(c, extras, !opts.guess).html : '');
       };
       el.querySelector('[data-submit]').onclick = w.submit;
     } else if (fmt === 'written') {
@@ -765,7 +766,7 @@
         let why = '';
         if (!ok) {
           const hit = ALL.find(x => x.k === c.k && x !== c && x.page === c.page && checkWritten(x, input.value));
-          if (hit) why = explainWrong(c, [hit.a]).html;
+          if (hit) why = explainWrong(c, [hit.a], !opts.guess).html;
         }
         finish(ok, input.value, '', why);
       };
@@ -800,7 +801,35 @@
     session = null;
     active = null;
   }
+  // Opening Compare from a question pauses the session so "Back" returns to the same screen.
+  let paused = null;
+  function pauseSession() {
+    paused = { session, active, nodes: [...$app.childNodes], y: window.scrollY, at: Date.now(), perf: performance.now(), nav: document.querySelector('.topbar nav .active')?.dataset.go || '' };
+    session = null;
+    active = null;
+  }
+  function resumeSession() {
+    const P = paused;
+    paused = null;
+    session = P.session;
+    active = P.active;
+    if (session && session.kind === 'cram') session.start += Date.now() - P.at;   // time spent comparing is not cram time
+    else if (session && typeof session.start === 'number' && session.timer) session.start += performance.now() - P.perf;
+    $app.replaceChildren(...P.nodes);
+    setNav(P.nav);
+    window.scrollTo(0, P.y);
+  }
+  function dropPaused() {
+    if (!paused) return;
+    const keep = session;
+    session = paused.session;
+    endSession();
+    session = keep;
+    paused = null;
+  }
+  const backBar = () => paused ? `<div class="backbar"><button class="primary" data-resume-session>← Back to your ${paused.session && paused.session.kind === 'cram' ? 'cram' : 'questions'}</button></div>` : '';
   function go(view, arg) {
+    if (view !== 'compare') dropPaused();
     endSession();
     ({ setup: viewSetup, progress: viewProgress, browse: viewBrowse, compare: viewCompare }[view] || viewSetup)(arg);
     window.scrollTo(0, 0);
@@ -809,7 +838,10 @@
   // any "Compare" link anywhere in the app
   document.addEventListener('click', e => {
     const b = e.target.closest && e.target.closest('[data-compare]');
-    if (b) { e.preventDefault(); go('compare', b.dataset.compare.split(',')); }
+    if (!b) return;
+    e.preventDefault();
+    if (session && !paused) pauseSession();
+    go('compare', b.dataset.compare.split(','));
   });
 
   // ====================================================================== upcoming quiz + today's plan
@@ -1454,17 +1486,25 @@
     const item = S.queue.shift();
     const c = item.c;
     if (item.phase === 'look') {
-      $app.innerHTML = `${cramHead()}
-        <div class="card"><p class="term-label">${termLabel(c)} <span class="tag">First look</span></p>
-          <p class="prompt">${esc(c.q)}</p>
-          <div class="verdict good lookans"><div class="ans">${answerHtml(c.a, c)}</div></div>
-          ${sourceBlock(c)}
-          <div class="actions"><button class="primary" data-next>Got it — test me later <span class="hide-sm"><kbd>Enter</kbd></span></button></div></div>`;
+      // Guess first: trying to answer before seeing it helps the answer stick, even when the guess is wrong.
+      // A guess is not graded: it does not change memory strength or count as a miss.
+      $app.innerHTML = `${cramHead()}<div class="card" data-q></div>`;
       $app.querySelector('[data-quit]').onclick = cramDone;
-      const next = $app.querySelector('[data-next]');
-      next.focus({ preventScroll: true });
-      next.onclick = () => { item.phase = 'test'; item.looked = true; item.hw = Math.max(item.hw, 1); cramInsert(item, 3); renderCram(); window.scrollTo(0, 0); };
-      active = { next: () => next.click() };
+      const q = $app.querySelector('[data-q]');
+      active = mountQuestion(q, c, c.items && c.items.length > 1 ? 'multi' : 'mc', ok => {
+        item.phase = 'test'; item.looked = true; item.hw = Math.max(item.hw, 1);
+        const after = q.querySelector('[data-after]');
+        after.innerHTML = `<p class="note">${ok ? 'Nice.' : 'A wrong guess is fine: it does not count against you.'} You get tested on this in a few cards.</p>
+          <div class="actions"><button class="primary" data-next>Continue <span class="hide-sm"><kbd>Enter</kbd></span></button></div>`;
+        const next = after.querySelector('[data-next]');
+        next.focus({ preventScroll: true });
+        next.onclick = () => { cramInsert(item, 3); renderCram(); window.scrollTo(0, 0); };
+        active.next = () => next.click();
+      }, { tag: 'Guess first', guess: true });
+      const note = document.createElement('p');
+      note.className = 'note guessnote';
+      note.textContent = 'You have not studied this card yet. Guess anyway, then read the answer.';
+      q.querySelector('.prompt').after(note);
       return;
     }
     const fmt = item.tests === 0 && !(c.items && c.items.length > 1) ? 'mc' : recallFormat(c);
@@ -1670,7 +1710,7 @@
       </div>`;
     }
 
-    $app.innerHTML = `<h1>Compare</h1>
+    $app.innerHTML = `${backBar()}<h1>Compare</h1>
       <p class="sub">Put look-alike drugs side by side to see exactly how they differ.</p>
       ${table}
       ${sel.length === 1 ? `<div class="card"><p>Selected: ${dot(sel[0].page)}<b>${esc(sel[0].label)}</b>. Add at least one more drug.</p></div>` : ''}
@@ -1690,6 +1730,8 @@
         ${compareSel.length ? '<div class="actions"><button class="secondary" data-clear>Clear selection</button></div>' : ''}
       </div>`;
 
+    const back = $app.querySelector('[data-resume-session]');
+    if (back) back.onclick = resumeSession;
     const rerender = () => viewCompare();
     $app.querySelectorAll('[data-pickpage]').forEach(b => b.onclick = () => { store.set('comparePage', +b.dataset.pickpage); rerender(); });
     $app.querySelectorAll('[data-toggle]').forEach(b => b.onclick = () => {
@@ -1703,7 +1745,7 @@
     const od = $app.querySelector('[data-onlydiff]');
     if (od) od.onchange = e => { store.set('onlyDiff', e.target.checked); $app.querySelector('.cmp-wrap').classList.toggle('onlydiff', e.target.checked); };
     const cl = $app.querySelector('[data-cmp-learn]');
-    if (cl) cl.onclick = () => startLearn(interleave(uniq(sel.flatMap(d => d.cards))), 'Compare set');
+    if (cl) cl.onclick = () => dropPaused() || startLearn(interleave(uniq(sel.flatMap(d => d.cards))), 'Compare set');
   }
 
   // ====================================================================== Progress view
