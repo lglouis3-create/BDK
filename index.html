@@ -2,19 +2,33 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>BDK Quiz</title>
-  <meta name="description" content="Practice quizzes for the Basic Drug Knowledge list: brand, generic, category, indication, and classification.">
+  <meta name="description" content="Study the 2026-2027 Basic Drug Knowledge list page by page: Learn mode, practice tests, flashcards, and progress tracking.">
+  <meta name="theme-color" content="#ffffff">
+  <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%234255ff'/%3E%3Ctext x='16' y='22' font-family='Arial' font-size='15' font-weight='700' fill='white' text-anchor='middle'%3EBDK%3C/text%3E%3C/svg%3E">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <script>
+    // Apply the saved theme before first paint.
+    (function () {
+      var t = 'auto';
+      try { t = JSON.parse(localStorage.getItem('bdk2:theme')) || 'auto'; } catch (e) {}
+      if (t === 'auto') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'blue' : 'light';
+      document.documentElement.dataset.theme = t;
+    })();
+  </script>
   <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
   <header class="topbar">
-    <button class="brand" data-go="setup" type="button">BDK Quiz</button>
+    <button class="brand" data-go="setup" type="button">BDK</button>
     <nav>
-      <button data-go="setup" type="button">Quiz</button>
-      <button data-go="browse" type="button">Drug list</button>
+      <button data-go="setup" type="button">Study</button>
+      <button data-go="progress" type="button">Progress</button>
+      <button data-go="browse" type="button">List</button>
     </nav>
+    <button class="themebtn" data-theme-toggle type="button">Auto</button>
   </header>
 
   <main id="app">

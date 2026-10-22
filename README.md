@@ -4,10 +4,19 @@ A static practice site and Quizlet deck set for the 2026-2027 Basic Drug Knowled
 
 ## The site
 
-- **Quiz tab:** pick pages directly or tap a BDK quiz from the APC III Fall 2026 schedule (the next quiz is preselected by date). Choose decks (Cards, Select ALL, Essential Knowledge, Organisms) and, within Cards, the question types (brand, generic, pharmacologic category, classification, common indications).
-- **Modes:** multiple choice (4 options), written (with an "I was right" override), and flashcards (cards marked "Still learning" return at the end of the round). Missed questions are remembered in the browser.
-- **Drug list tab:** each page's table with its footer legend, searchable.
-- **Download:** `downloads/BDK_2026-2027_Quizlet_Decks.zip` holds the Quizlet import files and the build report.
+- **Study tab:** a banner for the next BDK quiz (APC III Fall 2026 schedule: date, pages, calculation topic, and how much of it you have mastered), then page selection, color-coded with the PDF's header colors.
+- **Modes:**
+  - **Learn:** rounds of 7. Each card is asked as multiple choice first, then from memory (typed, select-all checkboxes, or a self-check for long notes). Right twice = mastered for the session; a miss sends the card back into the round.
+  - **Test:** one question at a time; list answers (ALL / Select ALL) use checkboxes.
+  - **Scroll:** every question on one scrolling page.
+  - **Written** and **Flashcards.**
+- **Which cards:** all, due for review, missed last time, or not studied yet.
+- **Progress tab:** mastery, accuracy, due count, and streak; next-quiz readiness by page; accuracy by question type; cards answered per day; trouble cards; suggestions with one-tap practice; export/import of progress between devices.
+- **Review schedule:** each right answer moves a card's next review out 1, 2, 4, 7, then 14 days (one step per day at most); a miss brings it back the same day; reviews are moved up to the day before the quiz that covers the card's page.
+- **List tab:** each page's table under its PDF header color, with its footer legend, searchable.
+- **Themes:** Auto, Light, Dark, Blue (button in the top bar).
+- **Offline:** installable to a phone home screen; works without a connection after the first visit.
+- Progress is saved in the browser (localStorage); nothing is sent anywhere.
 
 ## The decks
 
