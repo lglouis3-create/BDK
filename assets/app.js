@@ -8,21 +8,23 @@
     { id: 'class', label: 'Drug class', kinds: ['category', 'sa-category'] },
     { id: 'ind', label: 'Indications', kinds: ['indication', 'sa-indication'] },
     { id: 'rx', label: 'Rx / OTC / schedule', kinds: ['classification', 'sa-classification'] },
-    { id: 'safety', label: 'Side effects & boxed warnings', kinds: ['ek-kse', 'ek-bw', 'ek-which'] },
+    { id: 'safety', label: 'Side effects & boxed warnings', kinds: ['ek-kse', 'ek-bw'] },
     { id: 'notes', label: 'Other notes', kinds: ['ek-notes'] },
     { id: 'org', label: 'Organisms (ID pages)', kinds: ['organism', 'sa-organism'] },
+    { id: 'facts', label: 'One fact at a time', kinds: ['ek-which', 'ek-one'] },
   ];
   const TOPIC_PRESETS = [
     { label: 'BDK quiz questions', topics: ['names', 'class', 'ind', 'rx'], hint: 'The five question types on the BDK quiz schedule: brand, generic, category, indication, classification.' },
     { label: 'Everything', topics: TOPICS.map(t => t.id) },
-    { label: 'Safety only', topics: ['safety', 'notes'] },
+    { label: 'Safety only', topics: ['safety', 'notes', 'facts'] },
+    { label: 'One fact at a time', topics: ['facts'], hint: 'Each side effect, boxed warning and other note on its own: which drug has it, or which item belongs to a drug.' },
   ];
   const KIND_LABEL = {
     brand: 'Brand name', generic: 'Generic name', category: 'Drug class', classification: 'Rx / OTC / schedule',
     indication: 'Indications', 'sa-category': 'Select ALL · drug class', 'sa-classification': 'Select ALL · Rx / OTC',
     'sa-indication': 'Select ALL · indication', 'ek-kse': 'Key side effects', 'ek-bw': 'US boxed warnings',
     'ek-notes': 'Other notes', organism: 'Organisms', 'sa-organism': 'Select ALL · organism',
-    'ek-which': 'Which drug? · side effect or warning',
+    'ek-which': 'One fact · which drug?', 'ek-one': 'One fact · pick the item',
   };
   // Header colors sampled from the BDK PDF pages.
   const SYSTEM_COLOR = {
@@ -247,30 +249,108 @@
   }
   // Reverse questions for distinctive facts: a side effect or boxed warning that only 1-2 drugs
   // on the page have is the cue that tells those drugs apart from their neighbors.
+  // One fact at a time, built from each page's essential knowledge.
+  //  ek-which: a fact -> which drug(s) on the page have it (side effects, boxed warnings, other notes).
+  //  ek-one:   a drug (or merged-cell group) -> pick its one item (side effects and boxed warnings only;
+  //            other notes are sentences whose meanings overlap, so they make unfair wrong choices).
+  // Facts listed for more than half the page's drugs are skipped. A drug that lists the same effect in
+  // other words ("Nausea/vomiting" next to "Nausea") is neither a right nor a wrong choice.
+  const FACT_SECTIONS = [['bw', 'US boxed warning'], ['kse', 'key side effect'], ['notes', 'other note']];
+  const stripQual = x => x.replace(/^\([^)]*\) /, '');
+  const factBase = x => stripQual(x).toLowerCase().split(/\s*[/(]/)[0].trim().replace(/s$/, '');
+  // Parts of an item: "Nausea/vomiting" -> nausea, vomiting; parentheticals and qualifiers dropped.
+  const factParts = x => stripQual(x).toLowerCase().replace(/\([^)]*\)/g, ' ').split(/\/|,|\band\b/)
+    .map(t => t.trim().replace(/s$/, '')).filter(Boolean);
+  // Closely related terms. Used only to keep unfair choices out of a question, never to change a fact:
+  // a drug listing "Bone marrow suppression" is not offered "Thrombocytopenia" as a wrong answer.
+  const FAMILIES = [
+    /bone marrow|myelosuppression|thrombocytopenia|leukopenia|neutropenia|anemia|agranulocytosis|pancytopenia/,
+    /hepat|liver|transaminase/, /nephro|renal|kidney|creatinine/, /nausea|vomiting/, /bleed|hemorrhag/,
+    /drowsiness|sedation|somnolence/, /hypotension|orthostasis/, /\bqt|torsades|arrhythmi/, /suicid/,
+    /respiratory depression/, /dizziness|vertigo/, /headache/, /pruritus|itch/, /\brash/, /edema|swelling/,
+    /xerostomia|dry mouth/, /constipation/, /diarrhea/, /myopathy|rhabdomyolysis|myalgia/, /hypervolemia|volume overload/,
+    /tendon/, /cardiomyopathy|heart failure/, /thromboembolic|embolism|\bstroke|myocardial infarction|thrombotic/,
+    /hot flash|night sweat|vasomotor/, /bone density|bone mineral|osteopor|fracture/, /pregnan|fetal|teratogen/,
+    /abuse|misuse|addiction|dependence/, /weight gain/, /weight loss/, /hypoglycemia/, /hyperglycemia/,
+  ];
+  const families = x => { const t = x.toLowerCase(); return new Set(FAMILIES.map((re, i) => (re.test(t) ? i : -1)).filter(i => i >= 0)); };
+  function looksAlike(a, b) {
+    if (factBase(a) === factBase(b)) return true;
+    const pb = new Set(factParts(b));
+    if (factParts(a).some(t => pb.has(t))) return true;
+    const fb = families(b);
+    return [...families(a)].some(i => fb.has(i));
+  }
+  const noFact = it => /^(no major side effects|see above)/i.test(it);
+  function drugNames(d) {
+    const g = d.generic.replace(/\([^)]*\)/g, ' ').split(/,|\band\b/).map(x => x.trim());
+    return uniq([...g, ...(d.brandNames || '').split(',').map(x => x.trim())]).filter(x => x.length > 3);
+  }
+  // Hides the answer drugs' names inside a fact ("Methotrexate-induced lung disease" -> "[This drug]-induced ...").
+  function maskNames(text, ds) {
+    let out = text;
+    for (const n of ds.flatMap(drugNames).sort((a, b) => b.length - a.length)) {
+      const re = new RegExp(`(?<![\\w])${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w])`, 'gi');
+      out = out.replace(re, (m, i) => (i === 0 ? '[This drug]' : '[this drug]'));
+    }
+    return out;
+  }
+  function addGenerated(p, c, ds) {
+    c.items = c.items === undefined ? itemsOf(c) : c.items;
+    byId[c.id] = c;
+    ALL.push(c);
+    p.cards.push(c);
+    ds.forEach(d => d.cards.push(c));
+  }
   function generateWhichCards(p) {
-    const withEk = p.drugs.filter(d => d.facts.kse.length || d.facts.bw.length);
-    if (withEk.length < 3) return;
-    const strip = x => x.replace(/^\([^)]*\) /, '');
-    for (const [key, word] of [['bw', 'US boxed warning'], ['kse', 'key side effect']]) {
+    if (p.drugs.length < 3) return;
+    for (const [key, word] of FACT_SECTIONS) {
       const owners = new Map();
-      for (const d of p.drugs) for (const it of uniq(d.facts[key].map(strip))) {
-        if (/^(no major side effects|see above)/i.test(it)) continue;
+      for (const d of p.drugs) for (const it of uniq(d.facts[key].map(stripQual))) {
+        if (noFact(it)) continue;
         owners.set(it, [...(owners.get(it) || []), d]);
       }
       for (const [it, ds] of owners) {
-        if (ds.length > 2 || (key === 'kse' && ds.length === withEk.length)) continue;
+        if (ds.length * 2 > p.drugs.length) continue;
+        const lookAlike = p.drugs.filter(d => !ds.includes(d) && d.facts[key].some(x => looksAlike(x, it)));
+        const shown = maskNames(it, ds);
         const single = ds.length === 1;
         const c = {
-          f: 'Generated', k: 'ek-which', d: ds.map(d => d.i), page: p, topic: 'safety',
-          q: single ? `On p${p.page}, which drug has the ${word}: ${it}?` : `On p${p.page}, select ALL drugs with the ${word}: ${it}`,
+          f: 'Generated', k: 'ek-which', d: ds.map(d => d.i), page: p, topic: 'facts', fact: it, masked: shown !== it,
+          exclude: new Set(lookAlike.map(d => d.label)),
+          q: single ? `On p${p.page}, which drug has the ${word}: ${shown}${/[?.]$/.test(shown) ? '' : '?'}` : `On p${p.page}, select ALL drugs with the ${word}: ${shown}`,
           a: single ? ds[0].label : ds.map((d, i) => `(#${i + 1}) ${d.label}`).join('; '),
         };
         c.id = `${p.page}|${c.q}`;
-        c.items = itemsOf(c);
-        byId[c.id] = c;
-        ALL.push(c);
-        p.cards.push(c);
-        ds.forEach(d => d.cards.push(c));
+        addGenerated(p, c, ds);
+      }
+    }
+    // ek-one: every item on each side-effect and boxed-warning card
+    for (const ek of p.cards.filter(c => c.k === 'ek-kse' || c.k === 'ek-bw')) {
+      const key = ek.k === 'ek-kse' ? 'kse' : 'bw';
+      const word = key === 'kse' ? 'key side effect' : 'US boxed warning';
+      const mine = (ek.resolved || splitDepth0(ek.a, '; ')).filter(it => !noFact(it));
+      if (!mine.length) continue;
+      const ds = ek.d.map(i => p.drugs[i]);
+      const who = ek.q.replace(EK_Q, '').replace(/\?$/, '');
+      const fair = d => !ds.includes(d);
+      // everything these drugs list in this section, across all their cards (methadone has two boxed-warning cards)
+      const own = uniq([...mine, ...ds.flatMap(d => d.facts[key]),
+        ...p.cards.filter(x => x.k === ek.k && x.d.some(i => ek.d.includes(i))).flatMap(x => x.resolved || splitDepth0(x.a, '; '))]);
+      const itemsFrom = drugs => uniq(drugs.filter(fair).flatMap(d => d.facts[key]))
+        .filter(x => !noFact(x) && !own.some(m => m.toLowerCase() === x.toLowerCase() || looksAlike(m, x)));
+      const tiers = [
+        itemsFrom(p.drugs),
+        itemsFrom(PAGES.filter(q => q !== p && q.sys === p.sys).flatMap(q => q.drugs)),
+        itemsFrom(PAGES.filter(q => q.sys !== p.sys).flatMap(q => q.drugs)),
+      ];
+      for (const it of mine) {
+        const c = {
+          f: 'Generated', k: 'ek-one', d: ek.d.slice(), page: p, topic: 'facts', noun: word, pool: tiers, items: null,
+          q: `Which of these is a ${word} of ${who}?`, a: it,
+        };
+        c.id = `${p.page}|${c.q}|${it}`;
+        addGenerated(p, c, ds);
       }
     }
   }
@@ -460,7 +540,13 @@
   function distractors(c) {
     if (c.k === 'ek-which') {   // other drugs on the same page, look-alikes you confused first
       const conf = confusedRefs(c).map(drugByRef).filter(d => d && d.page === c.page).map(d => d.label);
-      return uniq([...shuffle(conf), ...shuffle(c.page.drugs.map(d => d.label))]).filter(l => l !== c.a).slice(0, 3);
+      const sys = shuffle(PAGES.filter(p => p !== c.page && p.sys === c.page.sys).flatMap(p => p.drugs.map(d => d.label)));
+      return uniq([...shuffle(conf), ...shuffle(c.page.drugs.map(d => d.label)), ...sys]).filter(l => l !== c.a && !(c.exclude && c.exclude.has(l))).slice(0, 3);
+    }
+    if (c.k === 'ek-one') {     // items of other drugs, same page first; never this drug's own items or look-alikes
+      const picks = [];
+      for (const tier of c.pool) for (const x of shuffle(tier)) if (picks.length < 3 && !picks.includes(x)) picks.push(x);
+      return picks;
     }
     const pages = new Set(settings.pages);
     // Answers you have mixed up with this drug come first: they are the comparisons that need practice.
@@ -490,6 +576,7 @@
     const have = new Set(correct.map(x => norm(baseLabel(x))));
     const picks = [];
     const consider = v => {
+      if (c.exclude && c.exclude.has(v)) return;
       const n = norm(baseLabel(v));
       if (picks.length < want && n && !have.has(n)) { have.add(n); picks.push(v); }
     };
@@ -528,12 +615,15 @@
     return similarity(norm(c.a), given) >= 0.8;
   }
 
+  // "Pick the item" questions share one question text per drug, so they are always answered from choices.
   function recallFormat(c) {
+    if (c.k === 'ek-one') return 'mc';
     if (c.items && c.items.length > 1) return 'multi';
     if (c.k === 'ek-which') return 'written';
     return SHORT_KINDS.has(c.k) && c.a.length <= 60 ? 'written' : 'self';
   }
   function formatFor(c, mode) {
+    if (c.k === 'ek-one') return 'mc';
     const list = c.items && c.items.length > 1;
     if (mode === 'written') return list ? 'multi' : c.a.length <= 80 ? 'written' : 'self';
     return list ? 'multi' : 'mc';
@@ -643,7 +733,7 @@
       ${ek ? `<details${open ? ' open' : ''}><summary>Essential knowledge</summary>${ek}</details>` : ''}`;
   }
   function sourceBlock(c) {
-    const ekCard = c.f === 'EssentialKnowledge' || c.k === 'ek-which';
+    const ekCard = c.f === 'EssentialKnowledge' || c.k === 'ek-which' || c.k === 'ek-one';
     const rows = c.d.length <= 2 ? c.d.map(i => rowCard(c.page, i, ekCard, c.k)).join('<hr>') : '';
     let cmp = '';
     if (c.d.length === 1) {
@@ -705,6 +795,15 @@
         lines.push(`${who([d])} — ${extra}`);
         continue;
       }
+      if (c.k === 'ek-one') {   // the drugs that list this item, same page first
+        const key = c.noun === 'key side effect' ? 'kse' : 'bw';
+        const all = PAGES.flatMap(pg => pg.drugs).filter(d => d.facts[key].includes(p));
+        const ds = all.filter(d => d.page === c.page).concat(all.filter(d => d.page !== c.page));
+        if (!ds.length) continue;
+        ds.slice(0, 3).forEach(d => refs.push(d.ref));
+        lines.push(`That is a ${c.noun} of ${who(ds)}.`);
+        continue;
+      }
       const owners = c.items && !/^\(#1\)|; /.test(p) && c.items.length > 1 ? ownersOfItem(c, p) : ownersOfAnswer(c, p);
       if (!owners.length) { lines.push(`“${esc(p)}” is not on the list for this question.`); continue; }
       owners.slice(0, 3).forEach(d => refs.push(d.ref));
@@ -757,6 +856,7 @@
       const vtext = opts.guess ? (ok ? 'Correct — good guess' : 'Not this time — here is the answer') : ok ? 'Correct' : 'Not quite';
       fb.innerHTML = `<div class="verdict ${ok ? 'good' : 'bad'}"><span data-vtext>${vtext}</span>${extra}
           ${showAns ? `<div class="ans">${ok ? '' : '<span class="anslabel">Correct answer</span>'}${answerHtml(c.a, c)}</div>` : ''}</div>
+        ${c.masked ? `<p class="note pdfwording">PDF wording: ${gloss(c.fact)}</p>` : ''}
         ${why}
         ${sourceBlock(c)}
         ${fmt === 'written' && !ok && given ? '<div class="actions"><button class="secondary" data-override>I was right</button></div>' : ''}
@@ -1177,6 +1277,8 @@
     if (mode === 'scroll') return startScroll(cards);
     if (mode === 'learn') return startLearn(cards);
     if (mode === 'match') return startMatch();
+    if (mode === 'flash') cards = cards.filter(c => c.k !== 'ek-one');   // a flashcard cannot show the choices
+    if (!cards.length) return go('setup');
     session = { kind: 'classic', mode, queue: cards.slice(), i: 0, results: [] };
     renderClassic();
   }
