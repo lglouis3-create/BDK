@@ -20,6 +20,8 @@ A static practice site and Quizlet deck set for the 2026-2027 Basic Drug Knowled
 - **Memory model:** FSRS-4.5 (default parameters). Each card's memory strength is the number of days until predicted recall falls to 90%; a right answer raises it (more after a longer gap), a miss lowers it and brings the card back today; only the first answer of the day counts; reviews are moved up to the day before the quiz covering the card's page. Familiar = 2+ days, mastered = 7+ days.
 - **Colors and definitions:** Category (teal) and Indications (pink) have their own color in every drug entry, question label, Compare row and List column; after you answer, the row the question asked about is highlighted. Medical terms in indications, side effects, boxed warnings and notes are underlined: tap one for a plain-language definition (written for this site, not quoted from a reference) and a MedlinePlus search link. The definitions are in `data/glossary.json`.
 - **List tab:** pick a quiz (Week 2 … Cumulative, or All pages) to show only its pages, and switch between **Table** and **PDF pages** (images of the PDF pages, `pages/p<n>.webp`; tap one to open it full size). The Study banner's **PDF pages** button opens the next quiz's pages. Search always looks at every page. Each page's table under its PDF header color with its footer legend; essential knowledge in sections (key side effects, boxed warnings, other notes; class-shared side effects grayed); Quizlet deck download.
+- **Back:** a Back button (in place of the logo) returns to the previous screen; leaving a quiz for another tab pauses it, and a "Back to your …" bar returns to the same question. The phone's back gesture works the same way.
+- **Updates:** when a new version is published, a card offers **Refresh**; the page reloads and comes back to the same screen and question (an answered question moves on to the next one, and nothing is recorded twice).
 - **Themes:** Auto, Light, Dark, Blue. **Offline:** installable, works without a connection after the first visit. Progress stays in the browser.
 
 ## The decks
@@ -40,6 +42,10 @@ cp out/BDK_2026-2027_Quizlet_Decks.zip downloads/
 - `extract.py` reads each page's table and its footer legend, and records which drugs share a merged cell (from the drawn cell rectangles), so a merged notes cell becomes one card naming every drug in it.
 - `norm.py` undoes text-extraction artifacts only (displaced subscripts such as "Alpha2", hyphens at line breaks, font ligatures).
 - `build.py` writes the decks, runs the audit (every drug present, one tab per line, no duplicates or empty fields, ONLY/ALL matching item counts, Select ALL groups of 2+), and writes `build_report.md` with card counts, abbreviation sources, items flagged for review, and differences from the prior-year list.
+
+## Tests and daily review
+
+`tests/run-all.sh` serves the site locally and runs the browser tests (Playwright with Chromium): `data` (card content checks), `ui`, `refresh`, `cram` and `regression` (every question answered through the site). A scheduled Claude session follows `docs/daily-review.md` each morning, logs to `reviews/LOG.md`, and lists anything that needs a decision in `reviews/OPEN_QUESTIONS.md`. `tools/bump-version.sh` updates the version in `assets/app.js`, `version.json` and `sw.js` together.
 
 ## Running locally
 

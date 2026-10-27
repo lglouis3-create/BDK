@@ -358,9 +358,6 @@ tr[data-i] { cursor: pointer; }
 .learnbar .progress { margin: 6px 0 6px; height: 8px; }
 .redo { color: var(--bad); }
 
-/* Back to a paused session from Compare */
-.backbar { position: sticky; top: 64px; z-index: 5; margin: 0 0 12px; padding: 8px 0; background: var(--bg); }
-.backbar .primary { width: 100%; }
 .guessnote { margin: -4px 0 12px; }
 
 /* Category and Indications get their own color everywhere: list rows, question labels, Compare, List.
@@ -402,3 +399,15 @@ tr[data-i] { cursor: pointer; }
 /* Cram answer chooser */
 .bannerlabel { margin: 12px 0 6px; font-weight: 600; }
 .seg.cramfmt { flex-wrap: wrap; }
+
+/* "New version" card: stays at the bottom until the user refreshes or picks Later */
+.updatecard { position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; padding: 0 12px calc(12px + env(safe-area-inset-bottom)); pointer-events: none; }
+.updatecard-in { pointer-events: auto; max-width: 560px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; justify-content: space-between;
+  background: var(--surface); border: 1px solid var(--accent); border-radius: var(--radius); padding: 12px 14px; box-shadow: 0 8px 30px rgba(0, 0, 0, .3); }
+.updatecard-in .note { margin: 2px 0 0; }
+.updatecard-in .row { flex-wrap: nowrap; }
+
+/* Back: the button takes the logo's place; the bar returns to a paused session from any other screen */
+.backbtn { border: 0; background: var(--accent-soft); color: var(--accent); font-weight: 800; border-radius: 8px; padding: 4px 8px; font-size: .9rem; white-space: nowrap; }
+.trailbar { position: sticky; top: 57px; z-index: 9; max-width: 780px; margin: 0 auto; padding: 8px 16px; background: var(--bg); }
+.trailbar .primary { width: 100%; }

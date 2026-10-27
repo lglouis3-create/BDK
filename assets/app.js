@@ -2,6 +2,8 @@
   'use strict';
 
   // ====================================================================== constants
+  // Must match version.json and the CACHE name in sw.js (tools/bump-version.sh updates all three).
+  const APP_VERSION = 'v13';
   // Plain-language topics; each covers question kinds from the Quizlet decks.
   const TOPICS = [
     { id: 'names', label: 'Brand ↔ generic', kinds: ['brand', 'generic'] },
@@ -310,13 +312,23 @@
         if (noFact(it)) continue;
         owners.set(it, [...(owners.get(it) || []), d]);
       }
-      for (const [it, ds] of owners) {
+      // Facts whose wording becomes the same once drug names are hidden ("...increase [this drug]
+      // concentrations" for fentanyl and for oxycodone) are one question with every such drug.
+      const byShown = new Map();
+      for (const [it, ds0] of owners) {
+        const shown = maskNames(it, ds0);
+        const g = byShown.get(shown) || { ds: [], facts: [] };
+        g.ds = uniq([...g.ds, ...ds0]);
+        g.facts.push(it);
+        byShown.set(shown, g);
+      }
+      for (const [shown, { ds, facts }] of byShown) {
         if (ds.length * 2 > p.drugs.length) continue;
-        const lookAlike = p.drugs.filter(d => !ds.includes(d) && d.facts[key].some(x => looksAlike(x, it)));
-        const shown = maskNames(it, ds);
+        const it = facts[0];
+        const lookAlike = p.drugs.filter(d => !ds.includes(d) && d.facts[key].some(x => facts.some(f => looksAlike(x, f))));
         const single = ds.length === 1;
         const c = {
-          f: 'Generated', k: 'ek-which', d: ds.map(d => d.i), page: p, topic: 'facts', fact: it, masked: shown !== it,
+          f: 'Generated', k: 'ek-which', d: ds.map(d => d.i), page: p, topic: 'facts', fact: facts.join('; '), masked: shown !== it,
           exclude: new Set(lookAlike.map(d => d.label)),
           q: single ? `On p${p.page}, which drug has the ${word}: ${shown}${/[?.]$/.test(shown) ? '' : '?'}` : `On p${p.page}, select ALL drugs with the ${word}: ${shown}`,
           a: single ? ds[0].label : ds.map((d, i) => `(#${i + 1}) ${d.label}`).join('; '),
@@ -329,7 +341,7 @@
     for (const ek of p.cards.filter(c => c.k === 'ek-kse' || c.k === 'ek-bw')) {
       const key = ek.k === 'ek-kse' ? 'kse' : 'bw';
       const word = key === 'kse' ? 'key side effect' : 'US boxed warning';
-      const mine = (ek.resolved || splitDepth0(ek.a, '; ')).filter(it => !noFact(it));
+      const mine = uniq((ek.resolved || splitDepth0(ek.a, '; ')).filter(it => !noFact(it)));
       if (!mine.length) continue;
       const ds = ek.d.map(i => p.drugs[i]);
       const who = ek.q.replace(EK_Q, '').replace(/\?$/, '');
@@ -350,6 +362,7 @@
           q: `Which of these is a ${word} of ${who}?`, a: it,
         };
         c.id = `${p.page}|${c.q}|${it}`;
+        if (byId[c.id]) continue;   // the same item on two of the drug's cards
         addGenerated(p, c, ds);
       }
     }
@@ -956,42 +969,89 @@
     document.querySelectorAll('.topbar nav [data-go]').forEach(b => b.classList.toggle('active', b.dataset.go === view));
   }
   let session = null;
+  let here = { v: 'setup' };   // the screen on show, so a refresh can come back to it
   function endSession() {
     if (session && session.io) session.io.disconnect();
     if (session && session.timer) clearInterval(session.timer);
     session = null;
     active = null;
   }
-  // Opening Compare from a question pauses the session so "Back" returns to the same screen.
-  let paused = null;
-  function pauseSession() {
-    paused = { session, active, nodes: [...$app.childNodes], y: window.scrollY, at: Date.now(), perf: performance.now(), nav: document.querySelector('.topbar nav .active')?.dataset.go || '' };
-    session = null;
-    active = null;
+  // ====================================================================== Back
+  // Leaving a screen (a tab, a Compare link, Last look) puts it on a trail, and Back returns to it.
+  // A session in progress is paused, not ended: its screen is kept exactly as it was. The phone's
+  // back gesture does the same (history entries), and during a session it pauses instead of ending it.
+  const SESSION_SCREENS = new Set(['classic', 'scroll', 'learn', 'learnround', 'cram', 'match']);
+  const DONE_SCREENS = new Set(['results', 'learndone', 'cramdone']);
+  const trail = [];
+  const backBtn = document.querySelector('[data-back]');
+  const trailBar = document.querySelector('[data-trailbar]');
+  function setHere(h) { here = h; updateBack(); }
+  function stopSession(s) { if (s && s.io) s.io.disconnect(); if (s && s.timer) clearInterval(s.timer); }
+  // the paused session still in progress, if any
+  const pausedAt = () => { for (let i = trail.length - 1; i >= 0; i--) if (trail[i].session && SESSION_SCREENS.has(trail[i].here.v)) return i; return -1; };
+  const sessionName = s => (s.kind === 'cram' ? 'cram' : s.kind === 'learn' ? 'Learn session' : 'questions');
+  function updateBack() {
+    const inSession = SESSION_SCREENS.has(here.v);
+    if (backBtn) {
+      backBtn.hidden = !trail.length || inSession;
+      document.querySelector('.topbar .brand').hidden = !backBtn.hidden;
+    }
+    if (!trailBar) return;
+    const i = inSession ? -1 : pausedAt();
+    trailBar.hidden = i < 0;
+    if (i >= 0) {
+      trailBar.innerHTML = `<button class="primary" data-trail-session type="button">← Back to your ${sessionName(trail[i].session)}</button>`;
+      trailBar.firstChild.onclick = () => history.go(i - trail.length);
+    }
   }
-  function resumeSession() {
-    const P = paused;
-    paused = null;
-    session = P.session;
-    active = P.active;
-    if (session && session.kind === 'cram') session.start += Date.now() - P.at;   // time spent comparing is not cram time
-    else if (session && typeof session.start === 'number' && session.timer) session.start += performance.now() - P.perf;
-    $app.replaceChildren(...P.nodes);
-    setNav(P.nav);
-    window.scrollTo(0, P.y);
+  function dropTrailSessions() { for (const t of trail) if (t.session) { stopSession(t.session); t.session = null; t.nodes = null; } }
+  function entryOfCurrent() {
+    const e = { here, y: window.scrollY, nav: document.querySelector('.topbar nav .active')?.dataset.go || '' };
+    if (session && session.kind !== 'match') {
+      e.session = session; e.active = active; e.at = Date.now();
+      e.nodes = SESSION_SCREENS.has(here.v) || DONE_SCREENS.has(here.v) ? [...$app.childNodes] : null;
+      session = null; active = null;
+    } else endSession();
+    return e;
   }
-  function dropPaused() {
-    if (!paused) return;
-    const keep = session;
-    session = paused.session;
+  function pushEntry(e) {
+    const last = trail[trail.length - 1];
+    if (last && !last.session && !e.session && last.here.v === e.here.v && e.here.v !== 'lastlook') { last.y = e.y; return; }
+    if (e.session) dropTrailSessions();   // one paused session at a time
+    trail.push(e);
+    if (trail.length > 30) stopSession(trail.shift().session);
+    try { history.pushState({ bdk: trail.length }, ''); } catch (err) { /* history unavailable */ }
+  }
+  function leaveCurrent() { pushEntry(entryOfCurrent()); }
+  // Starting a new session: older paused sessions are dropped, and the Study screen goes on the trail.
+  let restoring = false;   // drawing a screen again (Back, refresh): nothing new goes on the trail
+  function startFresh() {
+    dropTrailSessions();
+    if (!restoring && !session && !SESSION_SCREENS.has(here.v)) leaveCurrent(); else endSession();
+  }
+  function restoreEntry(e) {
     endSession();
-    session = keep;
-    paused = null;
+    if (e.session) {
+      session = e.session;
+      active = e.active || null;
+      if (session.kind === 'cram' && e.at) session.start += Date.now() - e.at;   // time away is not cram time
+    }
+    if (e.nodes) { $app.replaceChildren(...e.nodes); setNav(e.nav); setHere(e.here); }
+    else { restoring = true; try { showScreen(e.here); } finally { restoring = false; } }
+    requestAnimationFrame(() => window.scrollTo(0, e.y));
   }
-  const backBar = () => paused ? `<div class="backbar"><button class="primary" data-resume-session>← Back to your ${paused.session && paused.session.kind === 'cram' ? 'cram' : 'questions'}</button></div>` : '';
+  window.addEventListener('popstate', ev => {
+    const target = (ev.state && ev.state.bdk) || 0;
+    // a back gesture in the middle of a session pauses it, so "Back to your ..." can return to it
+    const keep = session && SESSION_SCREENS.has(here.v) ? entryOfCurrent() : null;
+    while (trail.length > target + 1 && trail.length > 1) stopSession(trail.pop().session);
+    const e = trail.pop();
+    if (e) restoreEntry(e); else { endSession(); viewSetup(); }
+    if (keep) { trail.push(keep); try { history.pushState({ bdk: trail.length }, ''); } catch (err) { /* ignore */ } updateBack(); }
+  });
+  if (backBtn) backBtn.onclick = () => history.back();
   function go(view, arg) {
-    if (view !== 'compare') dropPaused();
-    endSession();
+    leaveCurrent();
     ({ setup: viewSetup, progress: viewProgress, browse: viewBrowse, compare: viewCompare }[view] || viewSetup)(arg);
     window.scrollTo(0, 0);
   }
@@ -1001,9 +1061,133 @@
     const b = e.target.closest && e.target.closest('[data-compare]');
     if (!b) return;
     e.preventDefault();
-    if (session && !paused) pauseSession();
     go('compare', b.dataset.compare.split(','));
   });
+
+  // ====================================================================== refresh without losing your place
+  // Before reloading for an update, the screen and any session in progress are saved to sessionStorage
+  // (this tab only) and drawn again after the reload. Cards are saved by id, so an answer already given
+  // is never asked or recorded twice.
+  function pack(root) {
+    const seen = new Map();
+    const enc = v => {
+      if (v === null || typeof v !== 'object') return typeof v === 'function' ? undefined : v;
+      if (v.id && byId[v.id] === v) return { $c: v.id };
+      if (QUIZZES.includes(v)) return { $q: QUIZZES.indexOf(v) };
+      if (v instanceof Node || v instanceof IntersectionObserver) return undefined;
+      if (seen.has(v)) return { $r: seen.get(v) };
+      const id = seen.size;
+      seen.set(v, id);
+      if (v instanceof Map) return { $id: id, $m: [...v].map(([k, x]) => [enc(k), enc(x)]) };
+      if (v instanceof Set) return { $id: id, $s: [...v].map(enc) };
+      if (Array.isArray(v)) return { $id: id, $a: v.map(enc) };
+      const o = {};
+      for (const k of Object.keys(v)) if (k !== 'io' && k !== 'timer') { const e = enc(v[k]); if (e !== undefined) o[k] = e; }
+      return { $id: id, $o: o };
+    };
+    return enc(root);
+  }
+  function unpack(root) {
+    const tab = {};
+    const gone = x => x === undefined || (x && typeof x === 'object' && !Array.isArray(x) && 'c' in x && !x.c);   // a card the update removed
+    const dec = v => {
+      if (v === null || typeof v !== 'object') return v;
+      if ('$c' in v) return byId[v.$c];
+      if ('$q' in v) return QUIZZES[v.$q];
+      if ('$r' in v) return tab[v.$r];
+      if ('$m' in v) { const m = tab[v.$id] = new Map(); for (const [k, x] of v.$m) { const dk = dec(k); if (!gone(dk)) m.set(dk, dec(x)); } return m; }
+      if ('$s' in v) { const st = tab[v.$id] = new Set(); for (const x of v.$s) { const d = dec(x); if (!gone(d)) st.add(d); } return st; }
+      if ('$a' in v) { const a = tab[v.$id] = []; for (const x of v.$a) { const d = dec(x); if (!gone(d)) a.push(d); } return a; }
+      const o = tab[v.$id] = {};
+      for (const k of Object.keys(v.$o)) o[k] = dec(v.$o[k]);
+      return o;
+    };
+    return dec(root);
+  }
+  const SPOT_KEY = 'bdk2:spot';
+  function saveSpot() {
+    const pi = pausedAt();
+    const spot = {
+      at: Date.now(), y: window.scrollY, here: pack(here), compare: here.v === 'compare' ? compareSel : null,
+      session: session && session.kind !== 'match' ? pack(session) : null,
+      paused: pi >= 0 ? { here: pack(trail[pi].here), session: pack(trail[pi].session), y: trail[pi].y } : null,
+      search: (document.querySelector('[data-q].search') || {}).value || '',
+    };
+    try { sessionStorage.setItem(SPOT_KEY, JSON.stringify(spot)); } catch (e) { /* private mode: reload without restoring */ }
+  }
+  // Draws a saved screen again from the session already in `session`.
+  function showScreen(h) {
+    const S = session;
+    const has = kind => S && S.kind === kind;
+    switch (h.v) {
+      case 'classic':
+        if (!has('classic')) return viewSetup();
+        if (S.awaiting === false && S.mode !== 'flash') S.i++;   // answered before the refresh: go on to the next one
+        return renderClassic();
+      case 'results': return S && S.results ? viewResults() : viewSetup();
+      case 'scroll': return has('scroll') ? startScroll(S.queue, S) : viewSetup();
+      case 'learn': return has('learn') ? renderLearn(S.awaiting ? S.cur : null) : viewSetup();
+      case 'learnround': return has('learn') ? learnRoundSummary() : viewSetup();
+      case 'learndone': return has('learn') ? learnDone() : viewSetup();
+      case 'cram':
+        if (!has('cram')) return viewSetup();
+        if (S.awaiting && S.cur) S.queue.unshift(S.cur);   // not answered yet: ask the same card again
+        return renderCram();
+      case 'cramdone': return has('cram') ? cramDone() : viewSetup();
+      case 'match': return startMatch();
+      case 'lastlook': return viewLastLook(h.quiz, h.cards || []);
+      case 'progress': return viewProgress();
+      case 'compare': return viewCompare();
+      case 'browse': return viewBrowse();
+      default: return viewSetup();
+    }
+  }
+  function restoreSpot() {
+    let spot = null;
+    try { spot = JSON.parse(sessionStorage.getItem(SPOT_KEY)); sessionStorage.removeItem(SPOT_KEY); } catch (e) { return false; }
+    if (!spot || Date.now() - spot.at > 30 * 60 * 1000) return false;
+    try {
+      if (spot.paused) {   // a session paused behind this screen: back on the trail, drawn again on Back
+        trail.push({ here: unpack(spot.paused.here), session: unpack(spot.paused.session), y: spot.paused.y, nodes: null, at: Date.now() });
+      }
+      const h = unpack(spot.here) || { v: 'setup' };
+      session = spot.session ? unpack(spot.session) : null;
+      restoring = true;
+      try { if (h.v === 'compare' && spot.compare) viewCompare(spot.compare); else showScreen(h); } finally { restoring = false; }
+      if (h.v === 'browse' && spot.search) {
+        const input = $app.querySelector('[data-q].search');
+        if (input) { input.value = spot.search; input.dispatchEvent(new Event('input')); }
+      }
+      requestAnimationFrame(() => window.scrollTo(0, spot.y));
+      return true;
+    } catch (e) {
+      session = null;
+      trail.length = 0;
+      return false;
+    }
+  }
+
+  // ====================================================================== "new version" card
+  const updateCard = document.createElement('div');
+  updateCard.className = 'updatecard';
+  updateCard.hidden = true;
+  updateCard.setAttribute('role', 'status');
+  updateCard.innerHTML = `<div class="updatecard-in"><div><b>A new version of BDK is ready.</b>
+      <p class="note">Refresh to get it. You come back to the same screen and question.</p></div>
+    <div class="row"><button class="primary" data-update-now type="button">Refresh</button><button class="secondary" data-update-later type="button">Later</button></div></div>`;
+  document.body.appendChild(updateCard);
+  updateCard.querySelector('[data-update-now]').onclick = () => { saveSpot(); location.reload(); };
+  updateCard.querySelector('[data-update-later]').onclick = () => { updateCard.hidden = true; laterFor = Date.now(); };
+  let laterFor = 0;
+  async function checkForUpdate() {
+    if (Date.now() - laterFor < 60 * 60 * 1000) return;   // "Later" hides the card for an hour
+    try {
+      const r = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
+      if (!r.ok) return;
+      const { v } = await r.json();
+      if (v && v !== APP_VERSION) updateCard.hidden = false;
+    } catch (e) { /* offline */ }
+  }
 
   // ====================================================================== upcoming quiz + today's plan
   function currentQuiz() {
@@ -1087,7 +1271,7 @@
       if (mode === 'learn') startLearn(learnOrder(cards).slice(0, 25));
       else if (mode === 'match') startMatch();
       else if (mode === 'cram') startCram(cards, cur.q);
-      else if (mode === 'last') viewLastLook(cur.q);
+      else if (mode === 'last') { leaveCurrent(); viewLastLook(cur.q); }
       else startSession(interleave(cards).slice(0, 25), mode);
     });
     root.querySelectorAll('[data-seg="cramFmt"] button').forEach(b => b.onclick = () => {
@@ -1115,6 +1299,7 @@
 
   // ====================================================================== Study view
   function viewSetup() {
+    setHere({ v: 'setup' });
     setNav('setup');
     const selected = new Set(settings.pages);
     const cur = currentQuiz();
@@ -1272,7 +1457,7 @@
 
   // ====================================================================== Test / Written / Flashcards
   function startSession(cards, mode) {
-    endSession();
+    startFresh();
     if (!cards.length) return go('setup');
     if (mode === 'scroll') return startScroll(cards);
     if (mode === 'learn') return startLearn(cards);
@@ -1288,6 +1473,7 @@
   }
   function renderClassic() {
     if (session.i >= session.queue.length) return viewResults();
+    setHere({ v: 'classic' });
     setNav('');
     const c = session.queue[session.i];
     if (session.mode === 'flash') return renderFlash(c);
@@ -1296,7 +1482,9 @@
       <div class="card" data-q></div>
       <div class="actions"><button class="secondary" data-quit>End</button></div>`;
     $app.querySelector('[data-quit]').onclick = viewResults;
+    session.awaiting = true;
     active = mountQuestion($app.querySelector('[data-q]'), c, formatFor(c, session.mode), (ok, given) => {
+      session.awaiting = false;
       session.results.push({ c, ok, given });
       record(c, ok);
       const after = $app.querySelector('[data-after]');
@@ -1345,9 +1533,12 @@
   }
 
   // ====================================================================== Scroll mode
-  function startScroll(cards) {
+  function startScroll(cards, prior = null) {
     setNav('');
-    session = { kind: 'scroll', mode: 'scroll', queue: cards, results: [], rendered: 0 };
+    setHere({ v: 'scroll' });
+    session = { kind: 'scroll', mode: 'scroll', queue: cards, results: [], rendered: 0, answered: [] };
+    if (prior) { session.results = prior.results; session.answered = prior.answered; }
+    const answeredAt = new Map(session.answered);
     $app.innerHTML = `<div class="scrollhead">
         <div class="qmeta"><span data-sh-count>0 of ${cards.length} answered</span><span data-sh-right>0 correct</span>
           <button class="linkbtn" data-quit>Finish</button></div>
@@ -1376,7 +1567,14 @@
         li.dataset.idx = i;
         feed.appendChild(li);
         const c = cards[i];
+        if (answeredAt.has(i)) {   // answered before a refresh: show the question with its answer
+          li.classList.add(answeredAt.get(i) ? 'done-good' : 'done-bad');
+          li.innerHTML = `<p class="term-label">${termLabel(c)}</p><p class="prompt">${esc(c.q)}</p>
+            <div class="verdict ${answeredAt.get(i) ? 'good' : 'bad'}"><span>${answeredAt.get(i) ? 'Correct' : 'Not quite'}</span><div class="ans">${answerHtml(c.a, c)}</div></div>`;
+          continue;
+        }
         const w = mountQuestion(li, c, formatFor(c, 'scroll'), ok => {
+          session.answered.push([i, ok]);
           session.results.push({ c, ok, given: '' });
           record(c, ok);
           li.classList.add(ok ? 'done-good' : 'done-bad');
@@ -1393,6 +1591,8 @@
       session.rendered = end;
     };
     renderMore();
+    while (session.rendered < cards.length && session.answered.some(([i]) => i >= session.rendered - 1)) renderMore();
+    if (prior) update();
     const io = new IntersectionObserver(es => {
       if (es.some(e => e.isIntersecting) && session && session.kind === 'scroll' && session.rendered < cards.length) renderMore();
     }, { rootMargin: '600px' });
@@ -1405,7 +1605,7 @@
   // (multiple choice, then recall twice, spaced apart by other cards); a card you already
   // know needs one recall. A miss sends the card back to multiple choice later in the round.
   function startLearn(cards, title = 'Learn') {
-    endSession();
+    startFresh();
     if (!cards.length) return go('setup');
     session = {
       kind: 'learn', title, cards: uniq(cards), waiting: uniq(cards), work: [], step: new Map(), plan: new Map(), need: new Map(), hw: new Map(),
@@ -1458,12 +1658,15 @@
     const low = options.filter(c => L.step.get(c) === minStep);
     return low[Math.floor(Math.random() * low.length)];
   }
-  function renderLearn() {
+  function renderLearn(again) {
     const L = session;
+    setHere({ v: 'learn' });
     setNav('');
     if (!L.work.length) return learnDone();
     if (L.inRound >= ROUND) return learnRoundSummary();
-    const c = nextLearnCard();
+    const c = again && L.work.includes(again) ? again : nextLearnCard();
+    L.cur = c;
+    L.awaiting = true;
     L.history.push(c);
     const plan = L.plan.get(c);
     const step = L.step.get(c);
@@ -1486,6 +1689,7 @@
       }
     };
     active = mountQuestion($app.querySelector('[data-q]'), c, fmt, (ok, given) => {
+      L.awaiting = false;
       record(c, ok);
       L.results.push({ c, ok, given });
       L.roundLog.push({ c, ok });
@@ -1519,6 +1723,7 @@
   }
   function learnRoundSummary() {
     const L = session;
+    setHere({ v: 'learnround' });
     const misses = uniq(L.roundLog.filter(r => !r.ok).map(r => r.c));
     const right = L.roundLog.filter(r => r.ok).length;
     $app.innerHTML = `<div class="card">
@@ -1539,6 +1744,7 @@
   }
   function learnDone() {
     const L = session;
+    setHere({ v: 'learndone' });
     const firstTry = new Map();
     for (const r of L.results) if (!firstTry.has(r.c)) firstTry.set(r.c, r.ok);
     const firstRight = [...firstTry.values()].filter(Boolean).length;
@@ -1570,6 +1776,7 @@
 
   // ====================================================================== results (Test / Scroll / Written / Flashcards)
   function viewResults() {
+    setHere({ v: 'results' });
     setNav('');
     if (session.io) session.io.disconnect();
     active = null;
@@ -1657,7 +1864,7 @@
     return { cards: ordered.slice(0, fit), skipped: cards.length - weak.length, more: Math.max(0, ordered.length - fit) };
   }
   function startCram(cards, quiz) {
-    endSession();
+    startFresh();
     const plan = cramPlan(cards, quiz ? myDate(quiz) : null);
     if (!plan.cards.length) return go('setup');
     const queue = plan.cards.map(c => {
@@ -1682,9 +1889,12 @@
   }
   function renderCram() {
     const S = session;
+    setHere({ v: 'cram' });
     setNav('');
     if (!S.queue.length || Date.now() - S.start > S.budget + 60000) return cramDone();
     const item = S.queue.shift();
+    S.cur = item;
+    S.awaiting = true;
     const c = item.c;
     if (item.phase === 'look') {
       // Guess first: trying to answer before seeing it helps the answer stick, even when the guess is wrong.
@@ -1693,13 +1903,15 @@
       $app.querySelector('[data-quit]').onclick = cramDone;
       const q = $app.querySelector('[data-q]');
       active = mountQuestion(q, c, cramFormat(item), ok => {
+        S.awaiting = false;
         item.phase = 'test'; item.looked = true; item.hw = Math.max(item.hw, 1);
+        cramInsert(item, 3);
         const after = q.querySelector('[data-after]');
         after.innerHTML = `<p class="note">${ok ? 'Nice.' : 'A wrong guess is fine: it does not count against you.'} You get tested on this in a few cards.</p>
           <div class="actions"><button class="primary" data-next>Continue <span class="hide-sm"><kbd>Enter</kbd></span></button></div>`;
         const next = after.querySelector('[data-next]');
         next.focus({ preventScroll: true });
-        next.onclick = () => { cramInsert(item, 3); renderCram(); window.scrollTo(0, 0); };
+        next.onclick = () => { renderCram(); window.scrollTo(0, 0); };
         active.next = () => next.click();
       }, { tag: 'Guess first', guess: true });
       const note = document.createElement('p');
@@ -1712,6 +1924,7 @@
     $app.innerHTML = `${cramHead()}<div class="card" data-q></div>`;
     $app.querySelector('[data-quit]').onclick = cramDone;
     active = mountQuestion($app.querySelector('[data-q]'), c, fmt, (ok, given) => {
+      S.awaiting = false;
       record(c, ok);
       S.results.push({ c, ok, given });
       item.tests++;
@@ -1736,6 +1949,7 @@
   }
   function cramDone() {
     const S = session;
+    setHere({ v: 'cramdone' });
     active = null;
     store.set('lastCram', [...S.missed].map(c => c.id));
     const left = S.queue.filter(i => i.wins < 2).length;
@@ -1749,7 +1963,7 @@
         <button class="secondary" data-setup>Back to Study</button>
       </div>
       <p class="note">Right before the quiz, read the last-look sheet once: at very short delays, rereading helps as much as testing. ${S.quiz && daysBetween(today(), myDate(S.quiz)) === 1 ? 'Then sleep: sleep soon after studying helps you keep what you learned.' : ''}</p></div>`;
-    $app.querySelector('[data-last]').onclick = () => viewLastLook(S.quiz, uniq([...S.missed, ...S.queue.filter(i => i.wins < 2).map(i => i.c)]));
+    $app.querySelector('[data-last]').onclick = () => leaveCurrent() || viewLastLook(S.quiz, uniq([...S.missed, ...S.queue.filter(i => i.wins < 2).map(i => i.c)]));
     const r = $app.querySelector('[data-resume]');
     if (r) r.onclick = () => { S.start = Date.now(); S.budget = 15 * 60 * 1000; renderCram(); };
     $app.querySelector('[data-setup]').onclick = () => go('setup');
@@ -1758,6 +1972,7 @@
   // One page to read right before the quiz: the cards you missed, then the weakest of the rest.
   function viewLastLook(quiz, firstCards = []) {
     endSession();
+    setHere({ v: 'lastlook', quiz, cards: firstCards });
     setNav('');
     const pages = quiz ? quiz.pages : settings.pages;
     const date = quiz ? myDate(quiz) : today();
@@ -1791,7 +2006,8 @@
     return PAGES.filter(p => pages.has(p.page)).flatMap(p => p.drugs).filter(matchPair);
   }
   function startMatch() {
-    endSession();
+    startFresh();
+    setHere({ v: 'match' });
     const cands = shuffle(matchCandidates());
     // 6 pairs, no two sharing a left or right text (so every pair is unambiguous)
     const board = [];
@@ -1874,6 +2090,7 @@
   }
   let compareSel = [];
   function viewCompare(refs) {
+    setHere({ v: 'compare' });
     setNav('compare');
     if (refs) compareSel = refs.filter(drugByRef).slice(0, 5);
     const sel = compareSel.map(drugByRef);
@@ -1911,7 +2128,7 @@
       </div>`;
     }
 
-    $app.innerHTML = `${backBar()}<h1>Compare</h1>
+    $app.innerHTML = `<h1>Compare</h1>
       <p class="sub">Put look-alike drugs side by side to see exactly how they differ.</p>
       ${table}
       ${sel.length === 1 ? `<div class="card"><p>Selected: ${dot(sel[0].page)}<b>${esc(sel[0].label)}</b>. Add at least one more drug.</p></div>` : ''}
@@ -1931,8 +2148,6 @@
         ${compareSel.length ? '<div class="actions"><button class="secondary" data-clear>Clear selection</button></div>' : ''}
       </div>`;
 
-    const back = $app.querySelector('[data-resume-session]');
-    if (back) back.onclick = resumeSession;
     const rerender = () => viewCompare();
     $app.querySelectorAll('[data-pickpage]').forEach(b => b.onclick = () => { store.set('comparePage', +b.dataset.pickpage); rerender(); });
     $app.querySelectorAll('[data-toggle]').forEach(b => b.onclick = () => {
@@ -1946,11 +2161,12 @@
     const od = $app.querySelector('[data-onlydiff]');
     if (od) od.onchange = e => { store.set('onlyDiff', e.target.checked); $app.querySelector('.cmp-wrap').classList.toggle('onlydiff', e.target.checked); };
     const cl = $app.querySelector('[data-cmp-learn]');
-    if (cl) cl.onclick = () => dropPaused() || startLearn(interleave(uniq(sel.flatMap(d => d.cards))), 'Compare set');
+    if (cl) cl.onclick = () => startLearn(interleave(uniq(sel.flatMap(d => d.cards))), 'Compare set');
   }
 
   // ====================================================================== Progress view
   function viewProgress() {
+    setHere({ v: 'progress' });
     setNav('progress');
     const t = today();
     const all = summarize(ALL, t);
@@ -2128,6 +2344,7 @@
   const PAGE_IMG = {"2":[1636,1201],"3":[1640,1201],"4":[1640,1201],"5":[1640,1201],"6":[1636,1188],"7":[1636,1201],"8":[1636,1201],"9":[1636,1201],"10":[1640,1201],"11":[1641,1201],"12":[1636,1201],"13":[1640,1201],"14":[1633,1202],"15":[1639,1201],"16":[1639,1176],"17":[1642,1176],"18":[1640,1176],"19":[1636,1176],"20":[1636,1201],"21":[1638,1201],"22":[1635,1201],"23":[1627,1201],"24":[1630,1201],"25":[1630,1201],"26":[1630,1201],"27":[1635,1201]};
   // arg: { quiz: index into QUIZZES or -1 for all pages, view: 'table' | 'pdf' }
   function viewBrowse(arg = {}) {
+    setHere({ v: 'browse' });
     setNav('browse');
     if (arg.quiz !== undefined) store.set('listQuiz', arg.quiz);
     if (arg.view) store.set('listView', arg.view);
@@ -2244,10 +2461,13 @@
       settings.pages = (cur ? cur.q.pages : PAGES.map(p => p.page)).slice();
     }
     saveProgress();
-    viewSetup();
+    if (!restoreSpot()) viewSetup();
+    setTimeout(checkForUpdate, 5000);
+    setInterval(checkForUpdate, 15 * 60 * 1000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(); });
   };
   // Read-only hook for automated tests (only with ?debug in the URL).
-  if (/[?&]debug\b/.test(location.search)) window.__bdk = { card: id => byId[id], session: () => session, all: () => ALL };
+  if (/[?&]debug\b/.test(location.search)) window.__bdk = { card: id => byId[id], session: () => session, all: () => ALL, here: () => here, version: APP_VERSION, checkForUpdate };
   // The glossary is optional: the app still runs if it fails to load.
   const glossary = fetch('data/glossary.json').then(r => r.json()).then(loadGlossary).catch(() => {});
   if (window.BDK_DATA) glossary.then(() => boot(window.BDK_DATA));
