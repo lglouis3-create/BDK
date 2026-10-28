@@ -3,7 +3,7 @@
 
   // ====================================================================== constants
   // Must match version.json and the CACHE name in sw.js (tools/bump-version.sh updates all three).
-  const APP_VERSION = 'v14';
+  const APP_VERSION = 'v15';
   // Plain-language topics; each covers question kinds from the Quizlet decks.
   const TOPICS = [
     { id: 'names', label: 'Brand ↔ generic', kinds: ['brand', 'generic'] },
@@ -794,6 +794,20 @@
     if (k === 'sa-organism') return d.activity ? `activity against: ${d.activity}` : 'no organisms listed';
     return '';
   }
+  // Names each item that belongs but was left unchecked, so every drug (or item) gets its own feedback.
+  // Select ALL / which-drug questions: the drug with its own fact. Lists of a drug's facts: the items.
+  function explainMissed(c, missed) {
+    if (!missed.length) return '';
+    const drugItems = c.k.startsWith('sa-') || c.k === 'ek-which';
+    const lines = missed.map(m => {
+      if (!drugItems) return `<li>${gloss(m)}</li>`;
+      const d = drugsByLabel(m, c.page)[0];
+      if (!d) return `<li>${esc(m)}</li>`;
+      const fact = c.k === 'ek-which' ? `has this ${c.q.match(/the (key side effect|US boxed warning|other note):/)?.[1] || 'item'} too` : esc(fieldOf(d, c.k));
+      return `<li>${who([d])} — ${fact}</li>`;
+    });
+    return `<div class="whybox missbox"><p class="whyhead">What you missed</p><ul>${lines.join('')}</ul></div>`;
+  }
   // Returns { html, refs } explaining where the wrong choice(s) come from.
   function explainWrong(c, picks, track = true) {
     const lines = [];
@@ -848,7 +862,7 @@
         `<button class="opt" data-opt="${k}"><span class="key">${k + 1}</span><span>${answerHtml(o)}</span></button>`).join('')}</div>`;
     } else if (fmt === 'multi') {
       w.options = multiOptions(c);
-      body = `<p class="note">Select all that apply (${c.items.length} correct).</p>
+      body = `<p class="note">${opts.hideCount ? 'Select all that apply. Decide for each one: the number correct is not shown.' : `Select all that apply (${c.items.length} correct).`}</p>
         <div class="checks" role="group" aria-label="Select all that apply">${w.options.map((o, k) =>
           `<label class="opt check-opt" data-copt="${k}"><input type="checkbox" value="${k}"><span class="key">${k + 1}</span><span>${esc(o)}</span></label>`).join('')}</div>
         <div class="actions"><button class="primary" data-submit>Check answer</button></div>`;
@@ -907,7 +921,7 @@
         if (w.answered) return;
         const correct = new Set(c.items);
         const chosen = [...el.querySelectorAll('[data-copt] input')].filter(i => i.checked).map(i => w.options[+i.value]);
-        if (!chosen.length) { el.querySelector('.note').textContent = `Select at least one (${c.items.length} correct).`; return; }
+        if (!chosen.length) { el.querySelector('.note').textContent = opts.hideCount ? 'Select at least one.' : `Select at least one (${c.items.length} correct).`; return; }
         let right = 0, extra = 0;
         el.querySelectorAll('[data-copt]').forEach(l => {
           const o = w.options[+l.dataset.copt];
@@ -920,8 +934,9 @@
         el.querySelector('[data-submit]').remove();
         const ok = right === correct.size && extra === 0;
         const extras = chosen.filter(o => !correct.has(o));
+        const missed = c.items.filter(o => !chosen.includes(o));
         finish(ok, chosen.join('; '), ok ? '' : ` <span class="score-inline">${right} of ${correct.size} found${extra ? `, ${extra} extra` : ''}</span>`,
-          extras.length ? explainWrong(c, extras, !opts.guess).html : '');
+          (extras.length ? explainWrong(c, extras, !opts.guess).html : '') + explainMissed(c, missed));
       };
       el.querySelector('[data-submit]').onclick = w.submit;
     } else if (fmt === 'written') {
@@ -1671,8 +1686,11 @@
     const plan = L.plan.get(c);
     const step = L.step.get(c);
     const kind = plan[step];
-    const fmt = kind === 'mc' ? 'mc' : recallFormat(c);
-    const tag = kind === 'mc' ? 'Multiple choice' : fmt === 'multi' ? 'Recall · select all' : fmt === 'written' ? 'Recall · type it' : 'Recall · check yourself';
+    // A list answer is always one checkbox per item, never a bundle of items as one choice
+    // (bundled "complex" choices can be answered by recognizing a single item).
+    const fmt = kind === 'mc' ? (isList(c) ? 'multi' : 'mc') : recallFormat(c);
+    const hideCount = kind !== 'mc' && fmt === 'multi';
+    const tag = kind === 'mc' ? (fmt === 'multi' ? 'Select all' : 'Multiple choice') : fmt === 'multi' ? 'Recall · select all' : fmt === 'written' ? 'Recall · type it' : 'Recall · check yourself';
     $app.innerHTML = `<div class="learnhead"><span class="term-label">${esc(L.title)} · round ${L.round}</span>${learnBar()}</div>
       <div class="card" data-q></div>
       <div class="actions"><button class="secondary" data-quit>End session</button></div>`;
@@ -1706,6 +1724,7 @@
       active.next = () => next.click();
     }, {
       tag,
+      hideCount,
       onOverride: () => {
         undoMiss(c);
         L.missed.delete(c);

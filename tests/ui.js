@@ -1,5 +1,5 @@
 // Smaller features: glossary pop-up, colors, List quiz filter and PDF pages, Compare's Back button, touch hover.
-const { pw, QUIZ_DAY, check, open, run, overflow, answerRight } = require('./lib');
+const { pw, QUIZ_DAY, check, open, run, overflow, cardOf, answerRight } = require('./lib');
 
 run('ui', async browser => {
   const { page: p, errors } = await open(browser, { clock: QUIZ_DAY, theme: 'blue' });
@@ -62,6 +62,44 @@ run('ui', async browser => {
   await p.click('[data-trail-session]');
   await p.waitForTimeout(300);
   check('Back to your questions after the gesture', (await p.textContent('.prompt')) === q2);
+
+  // ---- Learn: list answers are checkboxes (never one bundled choice); later steps hide the count;
+  // leaving a correct item unchecked names it under "What you missed"
+  await p.click('.topbar nav [data-go="setup"]');
+  await p.click('[data-none]'); await p.click('[data-page="2"]');
+  await p.click('[data-preset="1"]');
+  await p.click('[data-seg="mode"] [data-val="learn"]');
+  await p.click('[data-start]');
+  let lists = 0, bundled = 0, countShownOnRecall = 0, missedBox = 0, missedTried = false;
+  for (let i = 0; i < 80; i++) {
+    if (await p.$('[data-cont]')) { await p.click('[data-cont]'); continue; }
+    if (!(await p.$('.prompt'))) break;
+    const c = await cardOf(p);
+    const tag = (await p.textContent('.tag')).trim();
+    if (c.items && c.items.length > 1) {
+      lists++;
+      if (await p.$('[data-opt]')) bundled++;
+      const note = await p.textContent('[data-q] .note');
+      if (tag.startsWith('Recall') && /correct\)/.test(note)) countShownOnRecall++;
+      if (!missedTried && await p.$('[data-copt]')) {   // check all but one correct item
+        missedTried = true;
+        const items = new Set(c.items); let skipped = false;
+        for (const l of await p.$$('[data-copt]')) {
+          const t = await (await l.$('span:last-child')).textContent();
+          if (items.has(t)) { if (!skipped) { skipped = true; continue; } await (await l.$('input')).check(); }
+        }
+        await p.click('[data-submit]');
+        if (await p.$('.missbox li')) missedBox++;
+        await p.click('[data-next]');
+        continue;
+      }
+    }
+    await answerRight(p);
+    await p.click('[data-next]');
+  }
+  check('Learn: list answers asked with one checkbox per item', lists > 0 && bundled === 0, { lists, bundled });
+  check('Learn: recall steps hide the number correct', countShownOnRecall === 0);
+  check('Learn: a missed item is named under "What you missed"', missedBox === 1);
 
   // ---- touch screens: no hover outline left on an answer choice
   const t = await browser.newContext({ ...pw.devices['iPhone 13'], timezoneId: 'America/Chicago' });
