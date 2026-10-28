@@ -40,6 +40,7 @@ cp out/BDK_2026-2027_Quizlet_Decks.zip downloads/
 ```
 
 - `extract.py` reads each page's table and its footer legend, and records which drugs share a merged cell (from the drawn cell rectangles), so a merged notes cell becomes one card naming every drug in it.
+- `render_pages.py` renders the PDF's pages 2-27 to `pages/p<n>.webp` for the List tab's PDF pages view (use an unmarked copy of the PDF).
 - `norm.py` undoes text-extraction artifacts only (displaced subscripts such as "Alpha2", hyphens at line breaks, font ligatures).
 - `build.py` writes the decks, runs the audit (every drug present, one tab per line, no duplicates or empty fields, ONLY/ALL matching item counts, Select ALL groups of 2+), and writes `build_report.md` with card counts, abbreviation sources, items flagged for review, and differences from the prior-year list.
 

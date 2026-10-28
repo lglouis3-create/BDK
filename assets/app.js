@@ -3,7 +3,7 @@
 
   // ====================================================================== constants
   // Must match version.json and the CACHE name in sw.js (tools/bump-version.sh updates all three).
-  const APP_VERSION = 'v13';
+  const APP_VERSION = 'v14';
   // Plain-language topics; each covers question kinds from the Quizlet decks.
   const TOPICS = [
     { id: 'names', label: 'Brand ↔ generic', kinds: ['brand', 'generic'] },
