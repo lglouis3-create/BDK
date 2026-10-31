@@ -17,3 +17,10 @@ Newest entries at the bottom. One entry per run.
 - Feedback names each item that belonged but was left unchecked ("What you missed"), each drug with its own fact.
 - Reason: bundled ("complex", Type K) choices can be answered by recognizing one item (Haladyna, Downing & Rodriguez 2002; Couch, Hubbard & Brassil 2018).
 - Tests: all passed (new Learn checks in tests/ui.js).
+
+## 2026-10-31 — Saturday: next quiz (Week 14, 17 Nov, pages 5 and 9)
+- Tests: all passed (data, ui, refresh, cram, regression).
+- Compared 12 random cards from pages 5 and 9 with the page images: all answers match the PDF. No card, date or code change needed.
+- Next quiz banner data (Week 14: pages 5, 9; Nov 17-19) matches the syllabus entry in the app.
+- Nothing fixed, no new questions for Louis. The earlier open questions (deck spec flags) are unchanged.
+- Note: this session was set to work on branch claude/cool-bohr-u1k9zo, so this entry is pushed there, not to main.
