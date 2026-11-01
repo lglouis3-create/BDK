@@ -3,7 +3,7 @@
 
   // ====================================================================== constants
   // Must match version.json and the CACHE name in sw.js (tools/bump-version.sh updates all three).
-  const APP_VERSION = 'v16';
+  const APP_VERSION = 'v17';
   // Plain-language topics; each covers question kinds from the Quizlet decks.
   const TOPICS = [
     { id: 'names', label: 'Brand ↔ generic', kinds: ['brand', 'generic'] },
@@ -166,6 +166,78 @@
   // without asking the student; Firefox would show a permission popup, so it is not asked there.
   if (navigator.storage && navigator.storage.persist && !/Firefox\//.test(navigator.userAgent)) {
     navigator.storage.persisted().then(p => p || navigator.storage.persist()).catch(() => {});
+  }
+
+  // ====================================================================== Home Screen
+  // Safari on iPhone and iPad deletes a site's saved data after 7 days without use unless the site is on the
+  // Home Screen (webkit.org/tracking-prevention). A Home Screen copy keeps its own storage, separate from
+  // Safari's (WebKit bug 181849: "Home Screen apps are created as isolated entities"), so the card takes the
+  // student through Export, Add to Home Screen, Import. Browsers with an install prompt get an Install button.
+  const WEBKIT_ITP = 'https://webkit.org/tracking-prevention/';
+  const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  let installPrompt = null;
+  addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPrompt = e; refreshHomeCards(); });
+  addEventListener('appinstalled', () => { installPrompt = null; refreshHomeCards(); });
+  function homeCardInner(onStudy) {
+    const later = onStudy ? ' <button class="secondary" data-hs-dismiss>Not now</button>' : '';
+    if (isStandalone()) {
+      if (!isIOS() || Object.keys(PROGRESS.cards).length) return '';
+      return `<h2>Progress from Safari</h2>
+        <p class="note">This Home Screen copy of BDK keeps its own progress, separate from Safari's. To bring your progress here, open BDK in Safari, tap <b>Export progress</b> on the Progress page, then come back here and use <b>Import progress</b>.</p>
+        ${onStudy ? `<div class="actions">${later.trim()}</div>` : ''}`;
+    }
+    if (isIOS()) {
+      return `<h2>Keep your progress: add BDK to your Home Screen</h2>
+        <p class="note">Safari on iPhone and iPad deletes a website's saved data after 7 days without use, unless the site is on the Home Screen (<a href="${WEBKIT_ITP}" target="_blank" rel="noopener">WebKit</a>). The Home Screen copy keeps its own progress, separate from Safari's, so bring yours across:</p>
+        <ol class="note hs-steps"><li>Tap <b>Export progress</b> below. It saves a file.</li><li>In Safari, tap <b>Share</b>, then <b>Add to Home Screen</b>.</li><li>Open BDK from the new icon, go to <b>Progress</b>, tap <b>Import progress</b> and choose the file.</li></ol>
+        <div class="actions"><button class="secondary" data-hs-export>Export progress</button>${later}</div>`;
+    }
+    if (installPrompt) {
+      return `<h2>Install BDK</h2>
+        <p class="note">Installing adds BDK to this device as an app with its own icon. After the first visit it also opens without a connection.</p>
+        <div class="actions"><button class="primary" data-install>Install BDK</button>${later}</div>`;
+    }
+    return '';
+  }
+  function homeCard(onStudy) {
+    if (onStudy && store.get('homeTipDismissed', false)) return '';
+    const inner = homeCardInner(onStudy);
+    return inner ? `<div class="card hs-card" data-hs="${onStudy ? 'study' : 'progress'}">${inner}</div>` : '';
+  }
+  function wireHome(root) {
+    root.querySelectorAll('[data-hs]').forEach(card => {
+      const ex = card.querySelector('[data-hs-export]');
+      if (ex) ex.onclick = exportProgress;
+      const inst = card.querySelector('[data-install]');
+      if (inst) inst.onclick = async () => {
+        const p = installPrompt;
+        if (!p) return;
+        installPrompt = null;
+        try { await p.prompt(); await p.userChoice; } catch { /* the browser declined to show it */ }
+        refreshHomeCards();
+      };
+      const later = card.querySelector('[data-hs-dismiss]');
+      if (later) later.onclick = () => { store.set('homeTipDismissed', true); card.remove(); };
+    });
+  }
+  function refreshHomeCards() {
+    document.querySelectorAll('[data-hs]').forEach(card => {
+      const inner = homeCardInner(card.dataset.hs === 'study');
+      if (!inner) { card.remove(); return; }
+      card.innerHTML = inner;
+    });
+    wireHome(document);
+  }
+  function exportProgress() {
+    const blob = new Blob([JSON.stringify({ app: 'bdk-quiz', exported: new Date().toISOString(), progress: PROGRESS }, null, 1)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `bdk-progress-${today()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
   // ====================================================================== theme
@@ -1352,6 +1424,7 @@
 
     $app.innerHTML = `
       ${bannerHtml()}
+      ${homeCard(true)}
       <h1 class="h-study">Study</h1>
       <div class="card">
         <h2><span class="stepnum">1</span>Pages</h2>
@@ -1405,6 +1478,7 @@
       </div>`;
 
     wireBanner($app);
+    wireHome($app);
     const refresh = () => {
       const isMatch = settings.mode === 'match';
       $app.querySelector('[data-topics-card]').hidden = isMatch;
@@ -2304,6 +2378,8 @@
 
       <div class="card"><h2>All pages</h2>${legend()}${PAGES.map(p => pageRow(p, t)).join('')}</div>
 
+      ${homeCard(false)}
+
       <div class="card">
         <h2>How this site schedules reviews</h2>
         <p class="note">Each card has a memory strength, estimated with the FSRS-4.5 model (default parameters): how many days until your chance of recalling it drops to 90%.
@@ -2331,16 +2407,8 @@
       startLearn(learnOrder(kinds[b.dataset.kindLearn].cards).slice(0, 25)));
     $app.querySelectorAll('[data-page-learn]').forEach(b => b.onclick = () =>
       startLearn(learnOrder(byPage[b.dataset.pageLearn].cards.filter(c => settings.topics.includes(c.topic))).slice(0, 25)));
-    $app.querySelector('[data-export]').onclick = () => {
-      const blob = new Blob([JSON.stringify({ app: 'bdk-quiz', exported: new Date().toISOString(), progress: PROGRESS }, null, 1)], { type: 'application/json' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `bdk-progress-${t}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    };
+    $app.querySelector('[data-export]').onclick = exportProgress;
+    wireHome($app);
     $app.querySelector('[data-import]').onchange = async e => {
       const msg = $app.querySelector('[data-io-msg]');
       try {

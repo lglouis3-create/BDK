@@ -22,6 +22,7 @@ A static GitHub Pages site (https://lglouis3-create.github.io/BDK/) for studying
 ## Behaviors worth knowing
 - Progress lives in each browser's localStorage (`bdk2:*`); the repository never sees a student's progress. When the browser refuses a write, `store` keeps the value in memory for the visit and shows one notice pointing to Export progress.
 - `sw.js` deletes only caches whose names start with `bdk-`: lglouis3-create.github.io also serves the other drill sites, and Cache Storage is shared by the whole origin. `tests/offline.js` checks this.
+- The Home Screen card (`homeCard` in app.js) shows on Study (until "Not now") and on Progress. On iPhone/iPad in Safari it gives the export → Add to Home Screen → import steps, because a Home Screen copy keeps its own storage, separate from Safari's (WebKit bug 181849), and Safari deletes a site's saved data after 7 days without use unless it is on the Home Screen (webkit.org/tracking-prevention). Browsers with an install prompt get an Install button. `tests/home.js` checks it.
 - A refresh from the "new version" card saves the screen and session to sessionStorage and restores them (`saveSpot` / `restoreSpot`). Back uses a trail of screens plus browser history (`leaveCurrent`, `popstate`).
 - `?debug` in the URL exposes `window.__bdk` for the tests.
 - Tests that depend on the date pin the clock to `QUIZ_DAY` in `tests/lib.js`.

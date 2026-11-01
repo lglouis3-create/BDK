@@ -4,7 +4,7 @@
 // origin, so cleanup deletes only this site's old caches (names starting with PREFIX) and never another
 // site's offline copy.
 const PREFIX = 'bdk-';
-const CACHE = 'bdk-v16';
+const CACHE = 'bdk-v17';
 const NET_TIMEOUT = 3500;
 const SHELL = ['./', 'index.html', 'assets/style.css', 'assets/app.js', 'data/decks.json', 'data/glossary.json', 'manifest.webmanifest', 'assets/icon-192.png'];
 
