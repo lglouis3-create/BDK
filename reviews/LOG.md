@@ -32,3 +32,7 @@ Newest entries at the bottom. One entry per run.
 ## 2026-11-01 — answer history (approved by Louis)
 - Every answer is now also kept in an answer history (`bdk2:log`: time, card code, right or wrong, mode), for fitting the memory model to Louis's own answers when BDK moves to FSRS-7 with the kit. Scheduling is unchanged. Export carries it, Import merges it, Reset clears it; if the browser refuses to save it, the oldest half is dropped so progress keeps saving. Version v18.
 - Tests: all passed (data, ui, refresh, cram, offline, home, history, regression); new `tests/history.js` (12 checks).
+
+## 2026-11-01 (Sunday) — next quiz end to end: Week 14 (17 Nov, pages 5 and 9)
+- Tests: all passed twice in a row (data, ui, refresh, cram, offline, home, history, regression); the intermittent `regression` failure logged earlier did not recur in these 2 runs.
+- Compared every drug row on pages 5 (Cardiovascular 1) and 9 (Pulmonary) with the page images: categories, indications, side effects, boxed warnings and notes all match the PDF. Nothing to fix; no new questions for Louis.
