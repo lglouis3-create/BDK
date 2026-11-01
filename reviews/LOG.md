@@ -23,3 +23,8 @@ Newest entries at the bottom. One entry per run.
 - The saved copy is now also used when the network answers slower than 3.5 s.
 - When the browser refuses to save (storage full, blocked, private window), `store` keeps the value for the visit and shows one notice pointing to Export progress; the site asks the browser to keep its storage (not in Firefox, which would show a popup).
 - New `tests/offline.js` (4 checks fail on the previous code). Tests: all passed (data, ui, refresh, cram, offline, regression). Commit `c78e78d`, version v16.
+
+## 2026-11-01 — Home Screen card (approved by Louis)
+- Study (until "Not now") and Progress show a Home Screen card. On iPhone and iPad in Safari it gives the steps Export progress → Add to Home Screen → Import progress in the new copy, because a Home Screen copy keeps its own storage, separate from Safari's (WebKit bug 181849), and Safari deletes a site's saved data after 7 days without use unless it is on the Home Screen (webkit.org/tracking-prevention). Other browsers with an install prompt get an Install BDK button. Version v17.
+- Tests: data, ui, refresh, cram, offline and home passed; new `tests/home.js` (19 checks).
+- Open: `regression` failed once in 4 runs today ("right answer graded wrong" on the pick-the-item question "Which of these is a key side effect of penicillin V potassium (PO), …?"; two cards share that text, answers "Diarrhea" and "Hypersensitivity reactions"). It passed on re-runs of both v17 and v16. Cause not found; check whether a choice list can contain the other card's answer.
