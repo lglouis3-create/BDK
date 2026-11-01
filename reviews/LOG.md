@@ -28,3 +28,7 @@ Newest entries at the bottom. One entry per run.
 - Study (until "Not now") and Progress show a Home Screen card. On iPhone and iPad in Safari it gives the steps Export progress → Add to Home Screen → Import progress in the new copy, because a Home Screen copy keeps its own storage, separate from Safari's (WebKit bug 181849), and Safari deletes a site's saved data after 7 days without use unless it is on the Home Screen (webkit.org/tracking-prevention). Other browsers with an install prompt get an Install BDK button. Version v17.
 - Tests: data, ui, refresh, cram, offline and home passed; new `tests/home.js` (19 checks).
 - Open: `regression` failed once in 4 runs today ("right answer graded wrong" on the pick-the-item question "Which of these is a key side effect of penicillin V potassium (PO), …?"; two cards share that text, answers "Diarrhea" and "Hypersensitivity reactions"). It passed on re-runs of both v17 and v16. Cause not found; check whether a choice list can contain the other card's answer.
+
+## 2026-11-01 — answer history (approved by Louis)
+- Every answer is now also kept in an answer history (`bdk2:log`: time, card code, right or wrong, mode), for fitting the memory model to Louis's own answers when BDK moves to FSRS-7 with the kit. Scheduling is unchanged. Export carries it, Import merges it, Reset clears it; if the browser refuses to save it, the oldest half is dropped so progress keeps saving. Version v18.
+- Tests: all passed (data, ui, refresh, cram, offline, home, history, regression); new `tests/history.js` (12 checks).

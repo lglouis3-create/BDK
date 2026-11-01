@@ -12,7 +12,7 @@ if ! curl -s -o /dev/null "$BDK_URL"; then
   for _ in 1 2 3 4 5 6 7 8 9 10; do curl -s -o /dev/null "$BDK_URL" && break; sleep 0.5; done
 fi
 node --check assets/app.js || exit 1
-tests=("$@"); [ ${#tests[@]} -eq 0 ] && tests=(data ui refresh cram offline home regression)
+tests=("$@"); [ ${#tests[@]} -eq 0 ] && tests=(data ui refresh cram offline home history regression)
 failed=()
 for t in "${tests[@]}"; do
   echo "===== $t"

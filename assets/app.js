@@ -3,7 +3,7 @@
 
   // ====================================================================== constants
   // Must match version.json and the CACHE name in sw.js (tools/bump-version.sh updates all three).
-  const APP_VERSION = 'v17';
+  const APP_VERSION = 'v18';
   // Plain-language topics; each covers question kinds from the Quizlet decks.
   const TOPICS = [
     { id: 'names', label: 'Brand ↔ generic', kinds: ['brand', 'generic'] },
@@ -230,7 +230,7 @@
     wireHome(document);
   }
   function exportProgress() {
-    const blob = new Blob([JSON.stringify({ app: 'bdk-quiz', exported: new Date().toISOString(), progress: PROGRESS }, null, 1)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ app: 'bdk-quiz', exported: new Date().toISOString(), progress: PROGRESS, log: LOG })], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `bdk-progress-${today()}.json`;
@@ -492,6 +492,37 @@
     return { S: Math.max(0.1, S), D };
   }
 
+  // ====================================================================== answer history
+  // One entry per answer, kept so a memory model can later be fitted to this student's own answers:
+  // [time in seconds, card code, 1 right / 0 wrong, mode]. The card code is an FNV-1a hash of the card id
+  // (8 hex digits); full ids are recovered by hashing the current cards. The history has its own key, so it
+  // never stops progress from saving: when the browser refuses the write, the oldest half is dropped.
+  const LOG_KEY = 'bdk2:log', LOG_MAX = 20000;
+  const cardCode = id => {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < id.length; i++) { h ^= id.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+    return (h >>> 0).toString(16).padStart(8, '0');
+  };
+  const LOG = (() => { try { const v = JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } })();
+  function saveLog() {
+    for (;;) {
+      try { localStorage.setItem(LOG_KEY, JSON.stringify(LOG)); return; }
+      catch { if (LOG.length < 100) return; LOG.splice(0, Math.ceil(LOG.length / 2)); }
+    }
+  }
+  function logAnswer(c, ok) {
+    LOG.push([Math.round(Date.now() / 1000), cardCode(c.id), ok ? 1 : 0, (session && (session.mode || session.kind)) || here.v]);
+    if (LOG.length > LOG_MAX) LOG.splice(0, LOG.length - LOG_MAX);
+    saveLog();
+  }
+  function mergeLog(entries) {
+    const seen = new Set(LOG.map(e => e[0] + '|' + e[1]));
+    for (const e of entries) if (Array.isArray(e) && e.length >= 3 && !seen.has(e[0] + '|' + e[1])) { LOG.push(e); seen.add(e[0] + '|' + e[1]); }
+    LOG.sort((x, y) => x[0] - y[0]);
+    if (LOG.length > LOG_MAX) LOG.splice(0, LOG.length - LOG_MAX);
+    saveLog();
+  }
+
   // ====================================================================== progress store
   // cards: { id: { n, r, w, streak, lapses, S, D, day, due, last, h:[1,0..], prev } }
   // days: { date: { n, c } }   confusions: { "refA|refB": count }   match: { key: bestSeconds }
@@ -563,10 +594,13 @@
     if (ok) d.c++;
     PROGRESS.days[t] = d;
     saveProgress();
+    logAnswer(c, ok);
   }
   function undoMiss(c) {   // "I was right" on a typed answer
     const s = cs(c);
     if (!s) return;
+    const code = cardCode(c.id);   // the logged miss becomes the right answer recorded below
+    for (let i = LOG.length - 1; i >= 0; i--) if (LOG[i][1] === code) { if (LOG[i][2] === 0) LOG.splice(i, 1); break; }
     if (s.prev) PROGRESS.cards[c.id] = s.prev; else delete PROGRESS.cards[c.id];
     const d = PROGRESS.days[today()];
     if (d) d.n--;
@@ -2384,7 +2418,8 @@
         <h2>How this site schedules reviews</h2>
         <p class="note">Each card has a memory strength, estimated with the FSRS-4.5 model (default parameters): how many days until your chance of recalling it drops to 90%.
           A right answer raises it (more after a longer gap); a miss lowers it and brings the card back today. Only your first answer to a card each day changes its strength.
-          Reviews are moved up to the day before the quiz that covers the card's page. Familiar = strength of 2+ days; mastered = 7+ days.</p>
+          Reviews are moved up to the day before the quiz that covers the card's page. Familiar = strength of 2+ days; mastered = 7+ days.
+          Each answer is also kept in an answer history (time, card, right or wrong) so the memory model can later be fitted to your own answers; Export progress includes it.</p>
         <div class="actions">
           <button class="secondary" data-export>Export progress</button>
           <label class="secondary filebtn">Import progress<input type="file" accept="application/json,.json" data-import hidden></label>
@@ -2422,6 +2457,7 @@
         for (const [k, v] of Object.entries(p.match || {})) if (!PROGRESS.match[k] || v < PROGRESS.match[k]) PROGRESS.match[k] = v;
         if (p.v !== 4) { delete PROGRESS.v; Object.assign(PROGRESS, loadProgressFrom(PROGRESS)); }
         saveProgress();
+        if (Array.isArray(json.log)) mergeLog(json.log);
         viewProgress();
         $app.querySelector('[data-io-msg]').textContent = `Imported ${Object.keys(p.cards).length} cards.`;
       } catch (err) {
@@ -2435,6 +2471,8 @@
       PROGRESS.confusions = {};
       PROGRESS.match = {};
       saveProgress();
+      LOG.length = 0;
+      saveLog();
       viewProgress();
     };
   }
