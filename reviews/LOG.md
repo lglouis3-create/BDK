@@ -17,3 +17,9 @@ Newest entries at the bottom. One entry per run.
 - Feedback names each item that belonged but was left unchecked ("What you missed"), each drug with its own fact.
 - Reason: bundled ("complex", Type K) choices can be answered by recognizing one item (Haladyna, Downing & Rodriguez 2002; Couch, Hubbard & Brassil 2018).
 - Tests: all passed (new Learn checks in tests/ui.js).
+
+## 2026-11-01 — offline copy and saved progress (approved by Louis)
+- `sw.js` deleted every cache not named for the current version. Cache Storage is shared by all of lglouis3-create.github.io, so a BDK update deleted the Medicinal-chemistry drill's offline copy. Cleanup now deletes only `bdk-*` caches.
+- The saved copy is now also used when the network answers slower than 3.5 s.
+- When the browser refuses to save (storage full, blocked, private window), `store` keeps the value for the visit and shows one notice pointing to Export progress; the site asks the browser to keep its storage (not in Firefox, which would show a popup).
+- New `tests/offline.js` (4 checks fail on the previous code). Tests: all passed (data, ui, refresh, cram, offline, regression). Commit `c78e78d`, version v16.
