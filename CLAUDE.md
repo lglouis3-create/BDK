@@ -20,7 +20,8 @@ A static GitHub Pages site (https://lglouis3-create.github.io/BDK/) for studying
 3. Commit with a message that says what changed and why; push to `main` (Pages deploys from `main`).
 
 ## Behaviors worth knowing
-- Progress lives in each browser's localStorage (`bdk2:*`); the repository never sees a student's progress.
+- Progress lives in each browser's localStorage (`bdk2:*`); the repository never sees a student's progress. When the browser refuses a write, `store` keeps the value in memory for the visit and shows one notice pointing to Export progress.
+- `sw.js` deletes only caches whose names start with `bdk-`: lglouis3-create.github.io also serves the other drill sites, and Cache Storage is shared by the whole origin. `tests/offline.js` checks this.
 - A refresh from the "new version" card saves the screen and session to sessionStorage and restores them (`saveSpot` / `restoreSpot`). Back uses a trail of screens plus browser history (`leaveCurrent`, `popstate`).
 - `?debug` in the URL exposes `window.__bdk` for the tests.
 - Tests that depend on the date pin the clock to `QUIZ_DAY` in `tests/lib.js`.

@@ -3,7 +3,7 @@
 
   // ====================================================================== constants
   // Must match version.json and the CACHE name in sw.js (tools/bump-version.sh updates all three).
-  const APP_VERSION = 'v15';
+  const APP_VERSION = 'v16';
   // Plain-language topics; each covers question kinds from the Quizlet decks.
   const TOPICS = [
     { id: 'names', label: 'Brand ↔ generic', kinds: ['brand', 'generic'] },
@@ -133,15 +133,40 @@
     return 1 - prev[b.length] / Math.max(a.length, b.length);
   }
 
+  // When the browser refuses a write (storage full, blocked, or a private window), the value is kept in
+  // memory for this visit, so answers given since the page opened are not dropped, and the student is told
+  // once to export a copy.
+  const MEM = {}, FAILED = new Set();
+  let saveWarned = false;
+  function saveWarn() {
+    if (saveWarned) return;
+    if (!document.body) { document.addEventListener('DOMContentLoaded', saveWarn, { once: true }); return; }
+    saveWarned = true;
+    const d = document.createElement('div');
+    d.className = 'warnbox savewarn';
+    d.setAttribute('role', 'alert');
+    d.innerHTML = 'This browser did not save your progress (storage is full or blocked). It is kept until you close or reload this page. To keep a copy, open <b>Progress</b> and use <b>Export progress</b>. <button type="button" class="secondary">OK</button>';
+    d.querySelector('button').onclick = () => d.remove();
+    document.body.appendChild(d);
+  }
   const store = {
     get(key, fallback) {
-      try { const v = localStorage.getItem('bdk2:' + key); return v ? JSON.parse(v) : fallback; }
-      catch { return fallback; }
+      const mem = () => { try { return MEM[key] === undefined ? fallback : JSON.parse(MEM[key]); } catch { return fallback; } };
+      if (FAILED.has(key)) return mem();
+      try { const v = localStorage.getItem('bdk2:' + key); return v ? JSON.parse(v) : mem(); }
+      catch { return mem(); }
     },
     set(key, value) {
-      try { localStorage.setItem('bdk2:' + key, JSON.stringify(value)); } catch { /* storage unavailable */ }
+      MEM[key] = JSON.stringify(value);
+      try { localStorage.setItem('bdk2:' + key, MEM[key]); FAILED.delete(key); return true; }
+      catch { FAILED.add(key); saveWarn(); return false; }
     },
   };
+  // Ask the browser to keep this site's data when the device runs low on space. Safari and Chrome decide
+  // without asking the student; Firefox would show a permission popup, so it is not asked there.
+  if (navigator.storage && navigator.storage.persist && !/Firefox\//.test(navigator.userAgent)) {
+    navigator.storage.persisted().then(p => p || navigator.storage.persist()).catch(() => {});
+  }
 
   // ====================================================================== theme
   const themeBtn = document.querySelector('[data-theme-toggle]');
