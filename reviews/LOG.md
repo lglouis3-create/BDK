@@ -32,3 +32,8 @@ Newest entries at the bottom. One entry per run.
 ## 2026-11-01 — answer history (approved by Louis)
 - Every answer is now also kept in an answer history (`bdk2:log`: time, card code, right or wrong, mode), for fitting the memory model to Louis's own answers when BDK moves to FSRS-7 with the kit. Scheduling is unchanged. Export carries it, Import merges it, Reset clears it; if the browser refuses to save it, the oldest half is dropped so progress keeps saving. Version v18.
 - Tests: all passed (data, ui, refresh, cram, offline, home, history, regression); new `tests/history.js` (12 checks).
+
+## 2026-11-02 — daily review (Monday: code and performance)
+- Tests: all passed (data, ui, refresh, cram, offline, home, history, regression). Regression re-run: passed again.
+- Open item from 2026-11-01 (regression failed once on the penicillin V potassium "pick the item" question): checked every pair of "pick the item" cards that share a question text. No card's wrong choices ever contain the other card's answer, so the choices are fair and the cause is not in the site code. 1 failure in about 6 later runs, none reproduced; most likely timing in the test. Left as is; watch for a repeat.
+- No site file changed, so no version bump. No new questions for Louis.
