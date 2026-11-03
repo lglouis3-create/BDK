@@ -37,3 +37,9 @@ Newest entries at the bottom. One entry per run.
 - Tests: all passed (data, ui, refresh, cram, offline, home, history, regression). Regression re-run: passed again.
 - Open item from 2026-11-01 (regression failed once on the penicillin V potassium "pick the item" question): checked every pair of "pick the item" cards that share a question text. No card's wrong choices ever contain the other card's answer, so the choices are fair and the cause is not in the site code. 1 failure in about 6 later runs, none reproduced; most likely timing in the test. Left as is; watch for a repeat.
 - No site file changed, so no version bump. No new questions for Louis.
+
+## 2026-11-03 — daily review (Tuesday: questions and answers)
+- Tests: all passed (data, ui, refresh, cram, offline, home, history, regression). Regression passed (no repeat of the 2026-11-01 failure).
+- Questions and answers: 25 random cards from the next quiz's pages (Week 14, 17 Nov: p5 Cardiovascular 1 and p9 Pulmonary), each compared with `pages/p5.webp` and `pages/p9.webp`. All 25 match the PDF (generic, brand, category, indication, Key Side Effect, Other Note, Select ALL lists). No wrong, ambiguous or unfair question found.
+- Already waiting for Louis (not repeated): the p5 "See individual drug components" combination products and their Select ALL groups.
+- No site file changed, so no version bump. No new questions for Louis. This branch only adds this log entry.
