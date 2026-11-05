@@ -4,9 +4,9 @@
 // origin, so cleanup deletes only this site's old caches (names starting with PREFIX) and never another
 // site's offline copy.
 const PREFIX = 'bdk-';
-const CACHE = 'bdk-v19';
+const CACHE = 'bdk-v20';
 const NET_TIMEOUT = 3500;
-const SHELL = ['./', 'index.html', 'assets/style.css', 'assets/app.js', 'data/decks.json', 'data/glossary.json', 'manifest.webmanifest', 'assets/icon-192.png'];
+const SHELL = ['./', 'index.html', 'assets/style.css', 'assets/app.js', 'data/decks.json', 'data/glossary.json', 'data/course-lists.json', 'manifest.webmanifest', 'assets/icon-192.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));

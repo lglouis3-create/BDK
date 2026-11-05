@@ -25,7 +25,10 @@ Amlodipine (Norvasc)`;
 run('lists', async browser => {
   const { page: p, errors } = await open(browser);
   await p.click('[data-seg-source] [data-val="list"]');
-  check('Study: "My drug lists" shows the empty state', (await p.textContent('[data-src-list]')).includes('No lists yet'));
+  // the course list from data/course-lists.json is added once
+  const osce = await p.evaluate(() => (JSON.parse(localStorage.getItem('bdk2:lists')) || []).find(l => l.id === 'osce-fall-2026'));
+  check('Course list "OSCE Fall 2026" is added with its 21 drugs and its source', !!osce && osce.name === 'OSCE Fall 2026' && osce.refs.length === 21 && /Possible Medications/.test(osce.source), osce && osce.refs.length);
+  check('Study: the course list is offered', (await p.textContent('[data-src-list]')).includes('OSCE Fall 2026'));
   await p.click('[data-newlist]');
   await p.fill('[data-listname]', 'Case meds'); await p.dispatchEvent('[data-listname]', 'change');
   await p.fill('[data-paste]', SLIDE);
@@ -54,7 +57,7 @@ run('lists', async browser => {
   // ---- BDK page
   await p.click('[data-see-page]');
   const sections = await p.$$eval('.bdksec', x => x.map(e => e.textContent.trim()));
-  const pagesInList = await p.evaluate(() => [...new Set(JSON.parse(localStorage.getItem('bdk2:lists'))[0].refs.map(r => +r.split(':')[0]))]);
+  const pagesInList = await p.evaluate(() => [...new Set(JSON.parse(localStorage.getItem('bdk2:lists')).find(l => l.name === 'Case meds').refs.map(r => +r.split(':')[0]))]);
   check('BDK page: one header bar per source page', sections.length === pagesInList.length, sections);
   const generics = await p.$$eval('.bdktable td.c-generic', x => x.map(e => e.textContent));
   check('BDK page: one row per drug', generics.length === 20, generics.length);
@@ -72,7 +75,7 @@ run('lists', async browser => {
   check('Study: list selected', (await p.textContent('[data-src-list] [aria-pressed="true"]')).includes('Case meds'));
   const counts = await p.$$eval('[data-tcount]', x => x.map(e => +e.textContent));
   const scoped = await p.evaluate(() => {
-    const refs = new Set(JSON.parse(localStorage.getItem('bdk2:lists'))[0].refs);
+    const refs = new Set(JSON.parse(localStorage.getItem('bdk2:lists')).find(l => l.name === 'Case meds').refs);
     return window.__bdk.all().filter(c => c.topic === 'ind' && c.d.some(i => refs.has(c.page.drugs[i].ref))).length;
   });
   const indCount = +(await p.textContent('[data-tcount="ind"]'));
@@ -81,7 +84,7 @@ run('lists', async browser => {
   await p.click('[data-seg="count"] [data-val="0"]');
   const avail = await p.textContent('[data-avail]');
   await p.click('[data-start]');
-  const refs = new Set(await p.evaluate(() => JSON.parse(localStorage.getItem('bdk2:lists'))[0].refs));
+  const refs = new Set(await p.evaluate(() => JSON.parse(localStorage.getItem('bdk2:lists')).find(l => l.name === 'Case meds').refs));
   let asked = 0, outside = 0;
   while (await p.$('.prompt') && asked < 400) {
     const ds = await p.evaluate(() => {
@@ -96,5 +99,15 @@ run('lists', async browser => {
     asked++;
   }
   check('Study: every question is about a drug on the list', asked > 50 && outside === 0, { avail, asked, outside });
+  // a deleted course list does not come back
+  await p.click('.topbar nav [data-go="setup"]');
+  await p.click('[data-seg-source] [data-val="list"]');
+  await p.click('[data-mylist="osce-fall-2026"]');
+  await p.click('[data-editlist]');
+  check('Course list editor shows its source', /Source: APC III Week 11/.test(await p.textContent('#app')));
+  await p.click('[data-delete-list]');
+  await p.reload(); await p.waitForSelector('[data-start]');
+  const again = await p.evaluate(() => (JSON.parse(localStorage.getItem('bdk2:lists')) || []).some(l => l.id === 'osce-fall-2026'));
+  check('A deleted course list is not added again', !again);
   check('No page errors', !errors.length, errors.slice(0, 5));
 });

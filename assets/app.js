@@ -3,7 +3,7 @@
 
   // ====================================================================== constants
   // Must match version.json and the CACHE name in sw.js (tools/bump-version.sh updates all three).
-  const APP_VERSION = 'v19';
+  const APP_VERSION = 'v20';
   // Plain-language topics; each covers question kinds from the Quizlet decks.
   const TOPICS = [
     { id: 'names', label: 'Brand ↔ generic', kinds: ['brand', 'generic'] },
@@ -660,6 +660,20 @@
   // A list is a name and drug refs ("page:index"), kept in this browser.
   const getLists = () => store.get('lists', []);
   const saveLists = lists => store.set('lists', lists);
+  // Lists from course materials (data/course-lists.json) are added to the student's lists once, so they can
+  // edit or delete them like their own; a deleted one is not added again.
+  function seedCourseLists(course) {
+    const seeded = new Set(store.get('seededLists', []));
+    const fresh = (course || []).filter(c => c && c.id && !seeded.has(c.id) && Array.isArray(c.refs));
+    if (!fresh.length) return;
+    const lists = getLists();
+    for (const c of fresh) {
+      if (!lists.some(l => l.id === c.id)) lists.push({ id: c.id, name: c.name, refs: c.refs.filter(r => drugByRef(r)), source: c.source || '' });
+      seeded.add(c.id);
+    }
+    saveLists(lists);
+    store.set('seededLists', [...seeded]);
+  }
   const activeList = () => (settings.source === 'list' ? getLists().find(l => l.id === settings.listId) : null) || null;
   const listDrugs = l => (l ? l.refs.map(drugByRef).filter(Boolean).sort((a, b) => a.page.page - b.page.page || a.i - b.i) : []);
   // Questions about a group the page defines (Select ALL, "which drug?") need every drug in the answer on the list;
@@ -2682,6 +2696,7 @@
     $app.innerHTML = `<h1>My drug list</h1>
       <label class="note" for="listname">List name</label>
       <input class="search" id="listname" data-listname value="${esc(L.name)}" maxlength="60">
+      ${L.source ? `<p class="note">Source: ${esc(L.source)}</p>` : ''}
       <div class="card">
         <h2>Paste a list</h2>
         <p class="note">One drug per line, the way a slide or handout writes it, for example “Fluoxetine (Prozac)”. Brand names in parentheses are checked against the BDK list. On an iPhone you can copy the text from a screenshot with Live Text.</p>
@@ -2805,6 +2820,7 @@
             <tr>${cols.map(([, h]) => `<th>${h}</th>`).join('')}</tr></thead>
           <tbody>${rows || '<tr><td colspan="6">No drugs in this list yet.</td></tr>'}</tbody></table></div>
         ${legend.length ? `<p class="bdklegend">${esc(legend.join('; '))}</p>` : ''}
+        ${L.source ? `<p class="bdklegend">List source: ${esc(L.source)}</p>` : ''}
         <p class="bdkfoot">${esc(DATA.edition)} · drugs from page${groups.length === 1 ? '' : 's'} ${uniq(groups.map(g => g.page.page)).join(', ')}</p>
       </div>`;
     $app.querySelector('[data-print]').onclick = () => window.print();
@@ -2856,8 +2872,9 @@
   });
 
   // ====================================================================== boot
-  const boot = json => {
+  const boot = (json, courseLists) => {
     loadData(json);
+    seedCourseLists(courseLists);
     settings.pages = settings.pages.filter(n => byPage[n]);
     settings.topics = settings.topics.filter(id => TOPICS.some(t => t.id === id));
     if (!settings.pages.length) {
@@ -2874,8 +2891,10 @@
   if (/[?&]debug\b/.test(location.search)) window.__bdk = { card: id => byId[id], session: () => session, all: () => ALL, here: () => here, version: APP_VERSION, checkForUpdate };
   // The glossary is optional: the app still runs if it fails to load.
   const glossary = fetch('data/glossary.json').then(r => r.json()).then(loadGlossary).catch(() => {});
-  if (window.BDK_DATA) glossary.then(() => boot(window.BDK_DATA));
-  else Promise.all([fetch('data/decks.json').then(r => r.json()), glossary]).then(([json]) => boot(json)).catch(() => {
+  // lists from course materials are optional too
+  const courseLists = fetch('data/course-lists.json').then(r => r.json()).catch(() => []);
+  if (window.BDK_DATA) Promise.all([glossary, courseLists]).then(([, c]) => boot(window.BDK_DATA, c));
+  else Promise.all([fetch('data/decks.json').then(r => r.json()), glossary, courseLists]).then(([json, , c]) => boot(json, c)).catch(() => {
     $app.innerHTML = '<div class="warnbox">The decks could not be loaded. Check your connection and reload.</div>';
   });
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});

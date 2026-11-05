@@ -44,3 +44,8 @@ Newest entries at the bottom. One entry per run.
 - "BDK page" prints the list in the PDF's layout and wording; "See above" (opioid boxed warnings) gets the p25 list added and labeled.
 - Fixed while testing: topic counts in Study counted the selected pages instead of the list; the UI color check depended on which question came up first.
 - Tests: all passed (new tests/lists.js).
+
+## 2026-11-05 — course list "OSCE Fall 2026" (requested by Louis)
+- Louis asked for a list labeled "OSCE Fall 2026". The PDF he mentioned did not arrive in the session; Drive holds `APC-III-Week-11-OSCE-Prep_2026.pdf` (Dr. Lahoud, October 26, 2026), whose "Possible Medications" slide has the same 19 lines as the screenshot sent earlier the same day.
+- `data/course-lists.json` holds the list (21 drugs); the app adds course lists to each student's lists once. Methylphenidate and dexmethylphenidate are both included because the slide writes "Methylphenidate (Focalin XR, Focalin)" and on the BDK list Focalin is dexmethylphenidate (p19); Louis can remove either.
+- Tests: all passed.
