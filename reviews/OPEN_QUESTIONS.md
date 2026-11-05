@@ -82,7 +82,12 @@ From `build_report.md` in `downloads/BDK_2026-2027_Quizlet_Decks.zip`. Each is k
 - p27: Keytruda(IV)
 
 ## Proposals from daily reviews
-_(none yet)_
+### 2026-11-05 — Space reviews by the time left before each quiz (learning algorithm; not applied)
+- Today: every card is scheduled to a fixed 90% recall target (FSRS-4.5 default parameters), and a review that would land on or after the quiz is moved to the day before it (`record` in app.js). Cards on pages with a quiz weeks away get the same spacing as cards due tomorrow.
+- Evidence: the best gap between study sessions depends on how long until the test, and is a fraction of that time (Cepeda, Vul, Rohrer, Wixted & Pashler 2008, Psychological Science 19(11):1095-1102). Retrieval practice beats rereading for later recall (Roediger & Karpicke 2006, Psychological Science 17(3):249-255). Mixing related topics beats blocking them (Rohrer & Taylor 2007, European Journal of Cognitive Psychology 19(5):597-620); the site already mixes look-alike drugs in "Mixed-up drugs".
+- Proposal: choose the target recall per card from the days left until its quiz, instead of one fixed value. This changes the learning algorithm, so I did not touch it. The exact mapping needs a number from the Cepeda 2008 tables or from FSRS fitted to your own answer history (`bdk2:log`); I have no sourced number to put in, so this waits for your decision and for more answers in the history.
+- Checked today, no change needed: with 60 seeded cards over 7 days the Progress tiles matched hand counts (familiar+mastered 30, due today 20, accuracy 50% of 56 answers, streak 7).
+
 
 ## Decided
 - 2026-10-25 — Single-fact questions ("One fact at a time"): approved with all recommendations (skip facts on more than half the page, keep look-alike drugs out of the choices, no other notes in "pick the item", hide drug names that give the answer away).
