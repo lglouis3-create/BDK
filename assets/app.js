@@ -3,7 +3,7 @@
 
   // ====================================================================== constants
   // Must match version.json and the CACHE name in sw.js (tools/bump-version.sh updates all three).
-  const APP_VERSION = 'v18';
+  const APP_VERSION = 'v19';
   // Plain-language topics; each covers question kinds from the Quizlet decks.
   const TOPICS = [
     { id: 'names', label: 'Brand ↔ generic', kinds: ['brand', 'generic'] },
@@ -642,6 +642,7 @@
   const settings = Object.assign({
     pages: [], topics: TOPIC_PRESETS[0].topics.slice(), selectAll: true, mode: 'learn', count: 25,
     filter: 'all', autoscroll: true, matchType: 'names', labDay: null, cramMin: 30, cramFmt: 'mixed',
+    source: 'pages', listId: null,   // study by PDF pages, or by one of the student's own drug lists
   }, saved);
   if (saved.kinds && !saved.topics) {   // settings from the deck/question-type version
     const kinds = new Set([...(saved.kinds || []), ...(saved.decks || []).flatMap(d => ({
@@ -655,11 +656,36 @@
 
   const topicKinds = () => new Set(TOPICS.filter(t => settings.topics.includes(t.id)).flatMap(t => t.kinds)
     .filter(k => settings.selectAll || !k.startsWith('sa-')));
-  function pool(filter = settings.filter) {
+  // ====================================================================== the student's own drug lists
+  // A list is a name and drug refs ("page:index"), kept in this browser.
+  const getLists = () => store.get('lists', []);
+  const saveLists = lists => store.set('lists', lists);
+  const activeList = () => (settings.source === 'list' ? getLists().find(l => l.id === settings.listId) : null) || null;
+  const listDrugs = l => (l ? l.refs.map(drugByRef).filter(Boolean).sort((a, b) => a.page.page - b.page.page || a.i - b.i) : []);
+  // Questions about a group the page defines (Select ALL, "which drug?") need every drug in the answer on the list;
+  // any other question needs one of its drugs on the list.
+  const GROUP_KIND = k => k.startsWith('sa-') || k === 'ek-which';
+  function inScope() {
+    if (settings.source === 'list') {
+      const refs = new Set((activeList() || { refs: [] }).refs);
+      return c => {
+        const r = c.d.map(i => c.page.drugs[i].ref);
+        return r.some(x => refs.has(x)) && (!GROUP_KIND(c.k) || r.every(x => refs.has(x)));
+      };
+    }
     const pages = new Set(settings.pages);
+    return c => pages.has(c.page.page);
+  }
+  function scopeMsg() {
+    if (settings.source !== 'list') return settings.pages.length ? '' : 'Pick at least one page';
+    const l = activeList();
+    return !l ? 'Pick or make a drug list' : !l.refs.length ? 'Add drugs to this list' : '';
+  }
+  function pool(filter = settings.filter) {
+    const ok = inScope();
     const kinds = topicKinds();
     const f = { all: () => true, due: isDue, missed: missedLast, new: c => stateOf(c) === 'new' }[filter] || (() => true);
-    return ALL.filter(c => pages.has(c.page.page) && kinds.has(c.k) && f(c));
+    return ALL.filter(c => ok(c) && kinds.has(c.k) && f(c));
   }
   // Learn order: most-forgotten reviews first, then missed, then new; well-known cards last.
   function learnOrder(cards) {
@@ -1285,6 +1311,8 @@
       case 'progress': return viewProgress();
       case 'compare': return viewCompare();
       case 'browse': return viewBrowse();
+      case 'mylist': return viewMyList(h.id);
+      case 'listpage': return viewListPage(h.id);
       default: return viewSetup();
     }
   }
@@ -1461,8 +1489,11 @@
       ${homeCard(true)}
       <h1 class="h-study">Study</h1>
       <div class="card">
-        <h2><span class="stepnum">1</span>Pages</h2>
-        <div class="row">${QUIZZES.map((q, i) => `<button class="chip${cur && cur.q === q ? ' next' : ''}${lastDay(q) < today() ? ' past' : ''}" data-quiz="${i}">
+        <h2><span class="stepnum">1</span>What to study</h2>
+        <div class="seg" data-seg-source><button data-val="pages" aria-pressed="${settings.source !== 'list'}">PDF pages</button><button data-val="list" aria-pressed="${settings.source === 'list'}">My drug lists</button></div>
+        <div data-src-list ${settings.source === 'list' ? '' : 'hidden'}>${myListsHtml()}</div>
+        <div data-src-pages ${settings.source === 'list' ? 'hidden' : ''}>
+        <div class="row" style="margin-top:12px">${QUIZZES.map((q, i) => `<button class="chip${cur && cur.q === q ? ' next' : ''}${lastDay(q) < today() ? ' past' : ''}" data-quiz="${i}">
           ${esc(q.label)} <span class="count">${q.pages.length > 6 ? fmtDay(q.start) : 'p' + q.pages.join(',')}</span></button>`).join('')}</div>
         <div class="row spread" style="margin-top:10px"><span class="note">Or pick pages:</span>
           <div><button class="linkbtn" data-all>All</button><button class="linkbtn" data-none>None</button></div></div>
@@ -1470,6 +1501,7 @@
           g.pages.map(p => { const s = summarize(p.cards); return `<button class="chip pagechip" style="--pc:${p.color}" data-page="${p.page}" aria-pressed="${selected.has(p.page)}"
             title="${esc(p.title)} · ${s.mastered + s.familiar} of ${s.total} familiar or mastered">${esc(pageName(p))}<span class="mini" style="--m:${pct(s.mastered + s.familiar, s.total)}%"></span></button>`; }).join('')}</div></div>`).join('')}
         <p class="note" style="margin-top:10px">The line under each page grows as its cards become familiar or mastered.</p>
+        </div>
       </div>
 
       <div class="card" data-topics-card>
@@ -1523,8 +1555,8 @@
       $app.querySelector('[data-autoscroll-row]').hidden = settings.mode !== 'scroll';
       $app.querySelector('[data-modehint]').textContent = MODES.find(m => m.id === settings.mode).hint;
       $app.querySelector('[data-countlabel]').textContent = settings.mode === 'learn' ? 'Cards per Learn session' : 'Number of questions';
-      const pages = new Set(settings.pages);
-      const inPages = ALL.filter(c => pages.has(c.page.page));
+      const ok = inScope();   // the chosen pages, or the chosen drug list
+      const inPages = ALL.filter(ok);
       for (const t of TOPICS) {
         const n = inPages.filter(c => c.topic === t.id && (settings.selectAll || !c.k.startsWith('sa-'))).length;
         const el = $app.querySelector(`[data-tcount="${t.id}"]`);
@@ -1538,7 +1570,7 @@
       const start = $app.querySelector('[data-start]');
       if (isCram) {
         const plan = cramPlan(pool('all'));
-        $app.querySelector('[data-avail]').textContent = !settings.pages.length ? 'Pick at least one page'
+        $app.querySelector('[data-avail]').textContent = scopeMsg() ? scopeMsg()
           : plan.cards.length ? `${plan.cards.length} cards in ~${settings.cramMin} min${plan.skipped ? ` · skips ${plan.skipped} you know well` : ''}` : settings.cramFmt === 'selectall' ? 'No weak Select ALL cards here' : 'You know every card here well';
         $app.querySelector('[data-cramfmt-hint]').textContent = CRAM_HINT[settings.cramFmt];
         start.disabled = !plan.cards.length;
@@ -1548,7 +1580,7 @@
         const drugs = matchCandidates();
         const best = PROGRESS.match[matchKey()];
         $app.querySelector('[data-best]').textContent = best ? `Best time for these pages: ${best.toFixed(1)} s` : '';
-        $app.querySelector('[data-avail]').textContent = !settings.pages.length ? 'Pick at least one page'
+        $app.querySelector('[data-avail]').textContent = scopeMsg() ? scopeMsg()
           : drugs.length >= 3 ? `${Math.min(6, drugs.length)} pairs per board, from ${drugs.length} drugs` : 'Not enough drugs with this pair type';
         start.disabled = drugs.length < 3;
         return;
@@ -1556,7 +1588,7 @@
       const n = pool().length;
       const shown = settings.count ? Math.min(n, settings.count) : n;
       const unit = settings.mode === 'learn' ? 'cards to learn' : 'questions';
-      $app.querySelector('[data-avail]').textContent = !settings.pages.length ? 'Pick at least one page'
+      $app.querySelector('[data-avail]').textContent = scopeMsg() ? scopeMsg()
         : !settings.topics.length ? 'Pick at least one topic'
           : n ? `${shown} ${unit} (of ${n})` : settings.filter === 'due' ? 'Nothing due on these pages' : 'No cards match';
       start.disabled = !n;
@@ -1571,6 +1603,16 @@
       const id = +b.dataset.page;
       setPages(settings.pages.includes(id) ? settings.pages.filter(x => x !== id) : [...settings.pages, id]);
     });
+    $app.querySelectorAll('[data-seg-source] button').forEach(b => b.onclick = () => {
+      settings.source = b.dataset.val;
+      if (settings.source === 'list' && !activeList() && getLists().length) settings.listId = getLists()[0].id;
+      saveSettings();
+      $app.querySelectorAll('[data-seg-source] button').forEach(x => x.setAttribute('aria-pressed', x === b));
+      $app.querySelector('[data-src-list]').hidden = settings.source !== 'list';
+      $app.querySelector('[data-src-pages]').hidden = settings.source === 'list';
+      refresh();
+    });
+    wireMyLists($app.querySelector('[data-src-list]'), refresh);
     $app.querySelector('[data-all]').onclick = () => setPages(PAGES.map(p => p.page));
     $app.querySelector('[data-none]').onclick = () => setPages([]);
     $app.querySelectorAll('[data-quiz]').forEach(b => b.onclick = () => setPages(QUIZZES[+b.dataset.quiz].pages.slice()));
@@ -1596,7 +1638,7 @@
     }));
     $app.querySelector('[data-start]').onclick = () => {
       if (settings.mode === 'match') return startMatch();
-      if (settings.mode === 'cram') { const cur = currentQuiz(); return startCram(pool('all'), cur && cur.q.pages.every(n => settings.pages.includes(n)) ? cur.q : null); }
+      if (settings.mode === 'cram') { const cur = currentQuiz(); return startCram(pool('all'), settings.source !== 'list' && cur && cur.q.pages.every(n => settings.pages.includes(n)) ? cur.q : null); }
       const cards = pick(pool(), settings.count);
       settings.mode === 'learn' ? startLearn(cards) : startSession(cards, settings.mode);
     };
@@ -2154,6 +2196,7 @@
     return d.indication && !d.indication.startsWith('See individual') ? [d.label, d.indication] : null;
   }
   function matchCandidates() {
+    if (settings.source === 'list') return listDrugs(activeList()).filter(matchPair);
     const pages = new Set(settings.pages);
     return PAGES.filter(p => pages.has(p.page)).flatMap(p => p.drugs).filter(matchPair);
   }
@@ -2507,6 +2550,7 @@
     $app.innerHTML = `<h1>Drug list</h1>
       <p class="sub">${esc(DATA.edition)}, page by page. Pick a quiz to see only its pages.</p>
       <div class="row listquiz">${quizChip(-1, 'All pages')}${QUIZZES.map((q, i) => quizChip(i, q.label + (q === (cur && cur.q) ? ' · next' : ''), q.pages.length > 6 ? '' : [...q.pages].sort((a, b) => a - b).join(', '))).join('')}</div>
+      ${getLists().length ? `<div class="row listquiz"><span class="note">My drug lists:</span>${getLists().map(l => `<button class="chip" data-openlist="${l.id}">${esc(l.name)} <span class="count">${l.refs.length}</span></button>`).join('')}</div>` : ''}
       <div class="seg listview" data-listview><button data-val="table" aria-pressed="${view === 'table'}">Table</button><button data-val="pdf" aria-pressed="${view === 'pdf'}">PDF pages</button></div>
       <div class="jump">${shown.map(p => `<a href="#pg${p.page}" class="pchip" style="--pc:${p.color}">${p.page}</a>`).join('')}</div>
       ${view === 'table' ? '<input class="search" data-q type="search" placeholder="Search generic, brand, category, indication…" aria-label="Search"><p class="note">Tap a row for essential knowledge.</p>' : '<p class="note">The pages as they appear in the PDF. Pinch to zoom, or tap a page to open it full size.</p>'}
@@ -2519,6 +2563,7 @@
       </div>`;
     $app.querySelectorAll('[data-listquiz]').forEach(b => b.onclick = () => viewBrowse({ quiz: +b.dataset.listquiz }));
     $app.querySelectorAll('[data-listview] button').forEach(b => b.onclick = () => viewBrowse({ view: b.dataset.val }));
+    $app.querySelectorAll('[data-openlist]').forEach(b => b.onclick = () => { leaveCurrent(); viewListPage(b.dataset.openlist); window.scrollTo(0, 0); });
     if (view === 'pdf') {
       $app.querySelector('[data-body]').innerHTML = shown.map(p => {
         const [w, h] = PAGE_IMG[p.page] || [1636, 1200];
@@ -2556,6 +2601,215 @@
     const input = $app.querySelector('[data-q]');
     input.oninput = () => render(input.value);
     render('');
+  }
+
+  // ---- Study step 1 block: pick a list, make or edit one, see it as a BDK page
+  function myListsHtml() {
+    const lists = getLists();
+    const l = activeList();
+    return `${lists.length ? `<div class="row" style="margin-top:12px">${lists.map(x => `<button class="chip" data-mylist="${x.id}" aria-pressed="${!!l && l.id === x.id}">${esc(x.name)} <span class="count">${x.refs.length}</span></button>`).join('')}</div>`
+      : '<p class="note" style="margin-top:12px">No lists yet. Make one from the drugs you need to know, or paste a list from a slide or handout.</p>'}
+      ${l ? `<p class="note">${listDrugs(l).slice(0, 6).map(d => esc(d.short)).join(', ')}${l.refs.length > 6 ? ` and ${l.refs.length - 6} more` : ''}</p>` : ''}
+      <div class="actions"><button class="secondary" data-newlist>New list</button>${l ? '<button class="secondary" data-editlist>Edit list</button><button class="secondary" data-listpage>BDK page</button>' : ''}</div>`;
+  }
+  function wireMyLists(root, refresh) {
+    if (!root) return;
+    const rewire = () => { root.innerHTML = myListsHtml(); wireMyLists(root, refresh); };
+    root.querySelectorAll('[data-mylist]').forEach(b => b.onclick = () => { settings.listId = b.dataset.mylist; saveSettings(); rewire(); refresh(); });
+    const open = fn => () => { leaveCurrent(); fn(); window.scrollTo(0, 0); };
+    root.querySelector('[data-newlist]').onclick = open(() => viewMyList(null));
+    const e = root.querySelector('[data-editlist]');
+    if (e) e.onclick = open(() => viewMyList(settings.listId));
+    const pg = root.querySelector('[data-listpage]');
+    if (pg) pg.onclick = open(() => viewListPage(settings.listId));
+  }
+
+  // ---- matching a pasted line ("Fluoxetine (Prozac)") to BDK drugs; nothing is added without a check mark
+  const nameKey = s => s.toLowerCase().replace(/\([^)]*\)/g, ' ').replace(/\//g, ' and ').replace(/[^a-z0-9 ]/g, ' ')
+    .split(/\band\b/).map(x => x.trim().replace(/\s+/g, ' ')).filter(Boolean).sort().join('+');
+  const brandList = d => (d.brandNames || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
+  function matchName(name, brands) {
+    const all = PAGES.flatMap(p => p.drugs);
+    const key = nameKey(name);
+    const lower = name.trim().toLowerCase();
+    const byBrand = b => all.filter(d => brandList(d).includes(b.toLowerCase()));
+    const exact = all.filter(d => nameKey(d.generic) === key);
+    if (exact.length === 1) {
+      const e = exact[0];
+      const other = brands.filter(b => !brandList(e).includes(b.toLowerCase()));
+      if (!other.length) return { status: 'ok', options: [{ d: e, checked: true }] };
+      const owners = uniq(other.flatMap(byBrand)).filter(d => d !== e);
+      if (!owners.length) return { status: 'check', options: [{ d: e, checked: true }],
+        note: `${other.join(', ')} ${other.length > 1 ? 'are not brands' : 'is not a brand'} of ${e.short} on the BDK list (it lists ${e.brandNames || 'no brand'}).` };
+      return { status: 'check', options: [e, ...owners].map(d => ({ d, checked: false })),
+        note: `On the BDK list, ${other.join(', ')} ${other.length > 1 ? 'belong' : 'belongs'} to ${owners.map(d => d.short).join(', ')}, not ${e.short}. Pick the drug you need.` };
+    }
+    if (exact.length > 1) return { status: 'choose', options: exact.map(d => ({ d, checked: false })), note: 'More than one BDK drug has this name. Pick the ones you need.' };
+    const asBrand = byBrand(lower);
+    if (asBrand.length === 1) return { status: 'ok', options: [{ d: asBrand[0], checked: true }], note: `${name.trim()} is a brand of ${asBrand[0].short}.` };
+    const near = uniq([...asBrand, ...brands.flatMap(byBrand), ...all.filter(d => d.generic.toLowerCase().startsWith(lower) || nameKey(d.generic).split('+').includes(key))]);
+    if (near.length) return { status: 'choose', options: near.map(d => ({ d, checked: false })), note: 'No exact match. These BDK drugs come closest; pick the ones you mean.' };
+    return { status: 'none', options: [], note: 'Not on the BDK list.' };
+  }
+  function matchLine(line) {
+    const text = line.replace(/^[\s•*·\-–\d.)]+/, '').trim();
+    const m = text.match(/^(.*?)\s*\(([^()]*)\)\s*$/);
+    const name = m ? m[1] : text;
+    const brands = m ? m[2].split(',').map(x => x.trim()).filter(Boolean) : [];
+    const parts = name.split(/\s+or\s+/i).map(x => x.trim()).filter(Boolean).map(n => matchName(n, brands));
+    const rank = { none: 3, choose: 2, check: 1, ok: 0 };
+    const worst = parts.reduce((a, r) => (rank[r.status] > rank[a] ? r.status : a), 'ok');
+    const seen = new Set();
+    const options = parts.flatMap(r => r.options).filter(o => !seen.has(o.d.ref) && seen.add(o.d.ref));
+    return { text, status: worst, options, notes: uniq(parts.map(r => r.note).filter(Boolean)) };
+  }
+
+  function viewMyList(id) {
+    let lists = getLists();
+    let L = id ? lists.find(x => x.id === id) : null;
+    if (id && !L) return viewSetup();   // the list was deleted
+    if (!L) {
+      L = { id: 'l' + Date.now().toString(36), name: `My drugs ${lists.length + 1}`, refs: [] };
+      lists.push(L);
+      saveLists(lists);
+      settings.source = 'list'; settings.listId = L.id; saveSettings();
+    }
+    setHere({ v: 'mylist', id: L.id });
+    setNav('');
+    const save = () => { lists = getLists().map(x => (x.id === L.id ? L : x)); saveLists(lists); };
+    const drugRow = d => `<li><div class="q">${dot(d.page)}<b>${esc(d.label)}</b> <span class="note">${esc(pageName(d.page))}</span></div>
+      <button class="linkbtn" data-remove="${d.ref}" aria-label="Remove ${esc(d.label)}">Remove</button></li>`;
+    $app.innerHTML = `<h1>My drug list</h1>
+      <label class="note" for="listname">List name</label>
+      <input class="search" id="listname" data-listname value="${esc(L.name)}" maxlength="60">
+      <div class="card">
+        <h2>Paste a list</h2>
+        <p class="note">One drug per line, the way a slide or handout writes it, for example “Fluoxetine (Prozac)”. Brand names in parentheses are checked against the BDK list. On an iPhone you can copy the text from a screenshot with Live Text.</p>
+        <textarea class="pastebox" data-paste rows="7" placeholder="Hydralazine&#10;Fluoxetine (Prozac)&#10;Metoprolol succinate or metoprolol tartrate"></textarea>
+        <div class="actions"><button class="primary" data-match>Find these drugs</button></div>
+        <div data-matches></div>
+      </div>
+      <div class="card">
+        <h2>Add one drug</h2>
+        <input class="search" data-find type="search" placeholder="Search generic or brand name" aria-label="Search generic or brand name">
+        <div class="row" data-found></div>
+      </div>
+      <div class="card">
+        <h2>In this list <span class="count" data-n></span></h2>
+        <ul class="missed" data-in></ul>
+      </div>
+      <div class="actions">
+        <button class="primary" data-study-list>Study this list</button>
+        <button class="secondary" data-see-page>See it as a BDK page</button>
+        <button class="secondary" data-delete-list>Delete list</button>
+      </div>`;
+    const drawIn = () => {
+      const ds = listDrugs(L);
+      $app.querySelector('[data-n]').textContent = ds.length;
+      $app.querySelector('[data-in]').innerHTML = ds.length ? ds.map(drugRow).join('') : '<li class="note">No drugs yet.</li>';
+      $app.querySelectorAll('[data-remove]').forEach(b => b.onclick = () => { L.refs = L.refs.filter(r => r !== b.dataset.remove); save(); drawIn(); });
+    };
+    const add = refs => { L.refs = uniq([...L.refs, ...refs]); save(); drawIn(); };
+    drawIn();
+    $app.querySelector('[data-listname]').onchange = e => { L.name = e.target.value.trim() || L.name; save(); };
+    // paste
+    $app.querySelector('[data-match]').onclick = () => {
+      const lines = $app.querySelector('[data-paste]').value.split(/\n+/).map(x => x.trim()).filter(x => x.replace(/[•*\s]/g, ''));
+      const results = lines.map(matchLine);
+      const box = $app.querySelector('[data-matches]');
+      const label = { ok: 'Found', check: 'Check this', choose: 'Pick one', none: 'Not found' };
+      box.innerHTML = results.length ? `<ul class="matchlist">${results.map(r => `<li class="match-${r.status}">
+          <div class="row spread"><b>${esc(r.text)}</b><span class="matchtag">${label[r.status]}</span></div>
+          ${r.options.map(o => `<label class="check"><input type="checkbox" data-pick="${o.d.ref}" ${o.checked ? 'checked' : ''}><span>${dot(o.d.page)}${esc(o.d.label)} <span class="note">${esc(pageName(o.d.page))}</span></span></label>`).join('')}
+          ${r.notes.map(n => `<p class="note">${esc(n)}</p>`).join('')}</li>`).join('')}</ul>
+        <div class="actions"><button class="primary" data-add-picked>Add checked drugs</button></div>` : '<p class="note">Paste at least one line.</p>';
+      const btn = box.querySelector('[data-add-picked]');
+      if (btn) btn.onclick = () => {
+        const refs = [...box.querySelectorAll('[data-pick]:checked')].map(i => i.dataset.pick);
+        add(refs);
+        box.innerHTML = `<p class="note">Added ${refs.length} drug${refs.length === 1 ? '' : 's'}.</p>`;
+        $app.querySelector('[data-paste]').value = '';
+      };
+    };
+    // search
+    const find = $app.querySelector('[data-find]');
+    find.oninput = () => {
+      const q = find.value.trim().toLowerCase();
+      const hits = q.length < 2 ? [] : PAGES.flatMap(p => p.drugs).filter(d => (d.generic + ' ' + d.brand).toLowerCase().includes(q)).slice(0, 10);
+      const out = $app.querySelector('[data-found]');
+      out.innerHTML = hits.map(d => `<button class="chip" data-add="${d.ref}" ${L.refs.includes(d.ref) ? 'aria-pressed="true"' : ''}>${dot(d.page)}${esc(d.label)}</button>`).join('');
+      out.querySelectorAll('[data-add]').forEach(b => b.onclick = () => { add([b.dataset.add]); b.setAttribute('aria-pressed', 'true'); });
+    };
+    $app.querySelector('[data-study-list]').onclick = () => { settings.source = 'list'; settings.listId = L.id; saveSettings(); go('setup'); };
+    $app.querySelector('[data-see-page]').onclick = () => { leaveCurrent(); viewListPage(L.id); window.scrollTo(0, 0); };
+    $app.querySelector('[data-delete-list]').onclick = () => {
+      if (!confirm(`Delete the list “${L.name}”? Your progress on the drugs is kept.`)) return;
+      saveLists(getLists().filter(x => x.id !== L.id));
+      if (settings.listId === L.id) { settings.listId = null; settings.source = 'pages'; saveSettings(); }
+      go('setup');
+    };
+  }
+
+  // ---- the list as one page laid out like the BDK PDF: same columns and wording, a header bar per source section,
+  // merged cells where neighboring drugs from the same page share an entry; prints on landscape paper
+  const EK_LABEL = /(Key Side Effects?(?: \([^)]*\))?|US Boxed Warnings?(?: \([^)]*\))?|Other [Nn]otes?(?: \([^)]*\))?):/g;
+  const ekCell = t => esc(t || '').replace(EK_LABEL, '\n<b>$1:</b>').trim().replace(/^\n/, '').replace(/\n/g, '<br>');
+  function viewListPage(id) {
+    const L = getLists().find(x => x.id === id);
+    if (!L) return viewSetup();
+    setHere({ v: 'listpage', id: L.id });
+    setNav('');
+    const ds = listDrugs(L);
+    const groups = [];
+    for (const d of ds) {
+      const g = groups[groups.length - 1];
+      if (g && g.page === d.page) g.drugs.push(d); else groups.push({ page: d.page, drugs: [d] });
+    }
+    const cols = [['category', 'Pharmacologic Category'], ['generic', 'Generic Name'], ['brand', 'Brand Name'],
+      ['classification', 'Classification'], ['indication', 'Common Indications'], ['essential', 'Essential Knowledge']];
+    const MERGE = new Set(['category', 'classification', 'indication', 'essential']);
+    // "See above" points at a list printed on another PDF page; that list is added, marked with its page
+    const seeAbove = d => {
+      const c = d.cards.find(x => x.resolved && x.resolvedFrom);
+      return c && /See above/.test(d.essential) ? `<div class="seeabove">“See above” on p${c.resolvedFrom.page}: ${c.resolved.map(esc).join('; ')}</div>` : '';
+    };
+    const cell = (d, k) => k === 'essential' ? ekCell(d.essential) + seeAbove(d)
+      : k === 'brand' ? esc(d.brand || '').replace(/; /g, '<br>')
+        : k === 'indication' ? esc(d.indication || '') + (d.activity ? `<div class="act"><b>Activity against:</b> ${esc(d.activity)}</div>` : '')
+          : esc(d[k] || '');
+    const rows = groups.map(g => {
+      const span = {};   // rowspan per [column][row]
+      for (const [k] of cols) {
+        span[k] = g.drugs.map(() => 1);
+        if (!MERGE.has(k)) continue;
+        for (let i = g.drugs.length - 1; i > 0; i--) {
+          const a = g.drugs[i - 1][k], b = g.drugs[i][k];
+          if (a && a === b && g.drugs[i].i === g.drugs[i - 1].i + 1) { span[k][i - 1] += span[k][i]; span[k][i] = 0; }
+        }
+      }
+      return `<tr class="bdksec"><td colspan="6" style="--pc:${g.page.color}">${esc(g.page.title)} <span>p${g.page.page}</span></td></tr>` +
+        g.drugs.map((d, i) => `<tr>${cols.map(([k]) => span[k][i] ? `<td${span[k][i] > 1 ? ` rowspan="${span[k][i]}"` : ''} class="c-${k}">${cell(d, k)}</td>` : '').join('')}</tr>`).join('');
+    }).join('');
+    // the source pages' legend entries, kept only for abbreviations that appear on this page
+    const shown = ds.map(d => [d.category, d.generic, d.brand, d.classification, d.indication, d.activity, d.essential].join(' ')).join(' ');
+    const used = entry => { const ab = entry.split(':')[0].trim(); return ab && new RegExp(`(^|[^A-Za-z0-9])${ab.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9])`).test(shown); };
+    const legend = uniq(groups.flatMap(g => (g.page.legend || '').split(/;\s*/).map(x => x.trim()).filter(Boolean))).filter(used);
+    $app.innerHTML = `<div class="actions noprint" style="margin-top:0">
+        <button class="primary" data-print>Print or save as PDF</button>
+        <button class="secondary" data-edit-list>Edit list</button>
+        <button class="secondary" data-study-this>Study this list</button></div>
+      <p class="note noprint">Built from the BDK list: every cell is the PDF's own wording for that drug. To save a PDF on an iPhone: Print, then Share, then Save to Files.</p>
+      <div class="bdkdoc">
+        <div class="bdkwrap"><table class="bdktable">
+          <thead><tr class="bdktitle"><th colspan="6">${esc(L.name.toUpperCase())}</th></tr>
+            <tr>${cols.map(([, h]) => `<th>${h}</th>`).join('')}</tr></thead>
+          <tbody>${rows || '<tr><td colspan="6">No drugs in this list yet.</td></tr>'}</tbody></table></div>
+        ${legend.length ? `<p class="bdklegend">${esc(legend.join('; '))}</p>` : ''}
+        <p class="bdkfoot">${esc(DATA.edition)} · drugs from page${groups.length === 1 ? '' : 's'} ${uniq(groups.map(g => g.page.page)).join(', ')}</p>
+      </div>`;
+    $app.querySelector('[data-print]').onclick = () => window.print();
+    $app.querySelector('[data-edit-list]').onclick = () => { leaveCurrent(); viewMyList(L.id); window.scrollTo(0, 0); };
+    $app.querySelector('[data-study-this]').onclick = () => { settings.source = 'list'; settings.listId = L.id; saveSettings(); go('setup'); };
   }
 
   // ====================================================================== tooltips (bars, segments, columns)

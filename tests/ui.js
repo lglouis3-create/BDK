@@ -42,6 +42,8 @@ run('ui', async browser => {
   check('Compare: Back button while a session is paused', !!(await p.$('[data-trail-session]')));
   await p.click('[data-trail-session]');
   check('Compare: Back returns to the same question', (await p.textContent('.prompt')) === q);
+  // drug rows show for questions about one or two drugs; answer until one appears
+  for (let i = 0; i < 40 && !(await p.$('[data-feedback] dl')); i++) { await p.click('[data-next]'); await answerRight(p); }
   check('Colors: Category and Indications rows marked', (await p.$$('[data-feedback] dt.k-cat')).length > 0 && (await p.$$('[data-feedback] dt.k-ind')).length > 0);
 
   // ---- Back: a session paused while visiting other screens comes back exactly

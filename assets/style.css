@@ -418,3 +418,46 @@ tr[data-i] { cursor: pointer; }
 /* items that belonged but were left unchecked */
 .missbox { border-color: var(--good); }
 .missbox .whyhead { color: var(--good); }
+
+/* My drug lists: paste box and match results */
+.pastebox { width: 100%; font: inherit; color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; resize: vertical; }
+.matchlist { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+.matchlist li { border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: 10px; padding: 8px 12px; background: var(--surface); }
+.matchlist .check { font-size: .92rem; }
+.matchlist .note { margin: 4px 0 0; }
+.matchtag { font-size: .72rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.match-ok { border-left-color: var(--good) !important; } .match-ok .matchtag { color: var(--good); }
+.match-check, .match-choose { border-left-color: var(--warn) !important; } .match-check .matchtag, .match-choose .matchtag { color: var(--warn); }
+.match-none { border-left-color: var(--bad) !important; } .match-none .matchtag { color: var(--bad); }
+
+/* A drug list laid out like the BDK PDF: black on white in every theme, like the paper */
+.bdkdoc { background: #fff; color: #000; border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; margin-top: 12px; }
+.bdkwrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.bdktable { border-collapse: collapse; width: 100%; min-width: 900px; font: 13px/1.3 Calibri, "Segoe UI", Arial, sans-serif; color: #000; border: 3px solid #000; }
+.bdktable th, .bdktable td { border: 1px solid #000; padding: 4px 6px; vertical-align: middle; text-align: left; }
+.bdktable thead th { font-weight: 700; text-align: center; background: #fff; }
+.bdktable .bdktitle th { background: #d9d9d9; text-align: left; font-size: 14px; border-bottom: 3px solid #000; }
+.bdktable .bdksec td { background: var(--pc); font-weight: 700; padding: 3px 6px; border-top: 3px solid #000; border-bottom: 3px solid #000; }
+.bdktable .bdksec span { float: right; font-weight: 600; }
+.bdktable .c-classification { text-align: center; }
+.bdktable .c-essential { min-width: 320px; }
+.bdktable .act { margin-top: 4px; }
+.bdklegend, .bdkfoot { margin: 6px 0 0; font: 12px/1.4 Calibri, "Segoe UI", Arial, sans-serif; color: #000; }
+.bdkfoot { text-align: right; }
+
+@media print {
+  @page { size: letter landscape; margin: 0.4in; }
+  body { background: #fff !important; }
+  .topbar, .trailbar, .updatecard, .termpop, .noprint, .tooltip { display: none !important; }
+  main { max-width: none; padding: 0; }
+  .bdkdoc { border: 0; padding: 0; margin: 0; }
+  .bdkwrap { overflow: visible; }
+  .bdktable { min-width: 0; font-size: 9pt; }
+  .bdktable tr { break-inside: avoid; }
+  .bdktable .bdksec td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .bdktable .bdktitle th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+/* the app's table header and note styles do not apply on the BDK page: the PDF uses plain black text */
+.bdktable th, .bdktable td, .bdktable .act { color: #000; text-transform: none; letter-spacing: normal; font-size: inherit; }
+.bdktable thead th { font-size: 13px; }
+.bdktable .seeabove { margin-top: 4px; padding-left: 8px; border-left: 2px solid #000; font-size: .92em; }

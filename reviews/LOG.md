@@ -37,3 +37,10 @@ Newest entries at the bottom. One entry per run.
 - Tests: all passed (data, ui, refresh, cram, offline, home, history, regression). Regression re-run: passed again.
 - Open item from 2026-11-01 (regression failed once on the penicillin V potassium "pick the item" question): checked every pair of "pick the item" cards that share a question text. No card's wrong choices ever contain the other card's answer, so the choices are fair and the cause is not in the site code. 1 failure in about 6 later runs, none reproduced; most likely timing in the test. Left as is; watch for a repeat.
 - No site file changed, so no version bump. No new questions for Louis.
+
+## 2026-11-05 — My drug lists (requested by Louis)
+- Study step 1 can use a drug list instead of PDF pages; lists are made by pasting a slide's list or searching, and each pasted line is matched to the BDK list.
+- Checked against Louis's "Possible medications" slide: 18 of 19 lines match exactly; "Methylphenidate (Focalin XR, Focalin)" is flagged because on the BDK list Focalin is dexmethylphenidate (p19), and both drugs are offered unchecked.
+- "BDK page" prints the list in the PDF's layout and wording; "See above" (opioid boxed warnings) gets the p25 list added and labeled.
+- Fixed while testing: topic counts in Study counted the selected pages instead of the list; the UI color check depended on which question came up first.
+- Tests: all passed (new tests/lists.js).
