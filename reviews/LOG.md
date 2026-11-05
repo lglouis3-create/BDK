@@ -37,3 +37,9 @@ Newest entries at the bottom. One entry per run.
 - Tests: all passed (data, ui, refresh, cram, offline, home, history, regression). Regression re-run: passed again.
 - Open item from 2026-11-01 (regression failed once on the penicillin V potassium "pick the item" question): checked every pair of "pick the item" cards that share a question text. No card's wrong choices ever contain the other card's answer, so the choices are fair and the cause is not in the site code. 1 failure in about 6 later runs, none reproduced; most likely timing in the test. Left as is; watch for a repeat.
 - No site file changed, so no version bump. No new questions for Louis.
+
+## 2026-11-05 — daily review (Thursday: progress and learning)
+- Tests: all passed (data, ui, refresh, cram, offline, home, history, regression).
+- Progress check: seeded 60 cards and 7 days of answers; tiles matched hand counts (30 familiar or mastered, 20 due, 50% of 56 answers, 7-day streak); no page errors.
+- No site file changed, so no version bump.
+- New question for Louis: schedule reviews by time left before each quiz (OPEN_QUESTIONS.md, with citations).
