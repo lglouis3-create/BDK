@@ -82,7 +82,8 @@ From `build_report.md` in `downloads/BDK_2026-2027_Quizlet_Decks.zip`. Each is k
 - p27: Keytruda(IV)
 
 ## Proposals from daily reviews
-_(none yet)_
+#### Larger tap targets on phone and iPad (proposed 2026-11-06, redesign of controls)
+Measured at 390 px and 820 px wide: the top bar buttons (Study, Compare, Progress, List) are 34-36 px tall, the theme button 26 px, Back 30 px, day chips (Tue, Wed, Thu) 28 px, quiz chips 36 px, and the page-number buttons in Compare 22 x 23 px. Apple's Human Interface Guidelines give 44 x 44 pt as the minimum tap size (developer.apple.com/design/human-interface-guidelines/accessibility). Proposal: raise these to 44 px. It changes spacing across every screen, so it is left for Louis to decide.
 
 ## Decided
 - 2026-10-25 — Single-fact questions ("One fact at a time"): approved with all recommendations (skip facts on more than half the page, keep look-alike drugs out of the choices, no other notes in "pick the item", hide drug names that give the answer away).

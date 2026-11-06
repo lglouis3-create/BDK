@@ -49,3 +49,9 @@ Newest entries at the bottom. One entry per run.
 - Louis asked for a list labeled "OSCE Fall 2026". The PDF he mentioned did not arrive in the session; Drive holds `APC-III-Week-11-OSCE-Prep_2026.pdf` (Dr. Lahoud, October 26, 2026), whose "Possible Medications" slide has the same 19 lines as the screenshot sent earlier the same day.
 - `data/course-lists.json` holds the list (21 drugs); the app adds course lists to each student's lists once. Methylphenidate and dexmethylphenidate are both included because the slide writes "Methylphenidate (Focalin XR, Focalin)" and on the BDK list Focalin is dexmethylphenidate (p19); Louis can remove either.
 - Tests: all passed.
+
+## 2026-11-06 — daily review (Friday: phone and iPad layout, themes, accessibility)
+- Tests: all passed (data, ui, lists, refresh, cram, offline, home, history, regression).
+- Checked Study, Progress, List and Compare at 390 px and 820 px in light, dark and blue: no sideways scroll, no page errors; text contrast measured on every text element.
+- Fix: the Back button text was 4.31:1 (light) and 4.06:1 (blue), below the 4.5:1 minimum (WCAG 2.1 SC 1.4.3). It now uses the main text color. Version v21.
+- For Louis: tap targets under 44 px (top bar, theme button, Back, day chips, Compare page numbers); see OPEN_QUESTIONS.md.
